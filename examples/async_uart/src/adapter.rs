@@ -247,6 +247,9 @@ static BOOTSTRAP_DONE: AtomicBool = AtomicBool::new(false);
 use embassy_hal_internal::atomic_ring_buffer::RingBuffer;
 static RX_RING: RingBuffer = RingBuffer::new();
 static TX_RING: RingBuffer = RingBuffer::new();
+const RING_CAP: usize = 4096;
+static mut RX_BUF: [u8; RING_CAP] = [0; RING_CAP];
+static mut TX_BUF: [u8; RING_CAP] = [0; RING_CAP];
 
 static mut UART_PORT: *const ArceOsUartPort = core::ptr::null();
 static mut DRIVER: *const Driver = core::ptr::null();
@@ -274,7 +277,11 @@ pub fn init_uart() -> &'static Driver {
     let port: &'static ArceOsUartPort = Box::leak(Box::new(port));
     unsafe { UART_PORT = port as *const ArceOsUartPort };
 
-    // 2. Initialize ring buffers
+    // 2. Initialize ring buffers (must call init() to set backing storage)
+    unsafe {
+        RX_RING.init(core::ptr::addr_of_mut!(RX_BUF) as *mut u8, RING_CAP);
+        TX_RING.init(core::ptr::addr_of_mut!(TX_BUF) as *mut u8, RING_CAP);
+    }
     let rx_ring = unsafe { RingBufRx::new(&RX_RING) };
     let tx_ring = unsafe { RingBufTx::new(&TX_RING) };
 
