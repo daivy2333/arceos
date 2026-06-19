@@ -1,6 +1,6 @@
 # Tasks — arceos 全局任务追踪
 
-> Last updated: 2026-06-19 (M3 7/7 ✅ — async_uart parity build passes, M4 ready)
+> Last updated: 2026-06-19 (M3 阻塞：IRQ→copier 链路通，echo task 未被唤醒)
 > 与 `openspec/changes/` 双向同步:每个进行中的 change 都有对应 Task 编号
 
 ## Milestone 路线
@@ -10,12 +10,18 @@
 | M0 | 当前 ArceOS、uart_16550、StarryOS 已验证实现的证据链与迁移设计 | — | 三份分析文档 + ADR-005/006 | ✅ 完成 |
 | M1 | RISC-V PLIC 与 UART IRQ 10 基线 | M0 | claim/complete、enable/disable、无 IRQ storm | ✅ 完成（15/15 GREEN Gate PASS） |
 | M2 | axtask 单 Future `block_on` 基线 | M0 | Pending 真阻塞、wake 恢复、竞态不丢唤醒 | ✅ 完成（14/14 GREEN：10 tests pass + spec compliance + rollback） |
-| M3 | `examples/async_uart` 复现 StarryOS parity | M1 + M2 | RX/TX copier + ring 双向 echo | ✅ 完成 (7/7 GREEN) |
+| M3 | `examples/async_uart` 复现 StarryOS parity | M1 + M2 | RX/TX copier + ring 双向 echo | 🚧 阻塞 (M3-B1) |
 | M4 | QEMU 稳定性 Gate | M3 | 10 分钟压力、20 次启动、空闲无轮询 | 待办 |
 | M5 | ArceOS stdin/readiness/stdout 分阶段接入 | M4 | shell 输入无 yield-poll，SBI fallback 保留 | 待办 |
 | M6 | 驱动硬化与通用 bottom-half 模式 | M5 | SMP/并发契约、测试、性能基线 | 待办 |
 
 关键路径：`M1 + M2 -> M3 -> M4 -> M5 -> M6`。M4 前不引入 TTY、POSIX 或通用设备模型扩展。
+
+## 阻塞(Blocked)
+
+| ID | 主题 | 阻塞原因 | 解阻条件 |
+|----|------|----------|----------|
+| **M3-B1** | echo task 不被唤醒 | RX copier push→ring→wake 后 echo task 未恢复运行；12+ 次 IRQ 均无 `echoed=N` 输出 | ArceOsWakerSet 的 wake 链路验证通过（waker 注册/存储/通知/任务恢复） |
 
 ## 进行中(In Progress)
 

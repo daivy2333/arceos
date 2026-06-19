@@ -511,3 +511,20 @@ self.inner.resched();                 // 切换 -> 上下文切换
 - `AsyncUartReader::read().await` 当前只 pop 一次，空 ring 返回 `Ok(0)`；`AsyncUartWriter::write().await` 允许短写，`flush()` 立即返回。
 - M3 parity 应直接在公开 ring API 上实现 `pop/push → register waker → 二次检查 → Pending`，并循环处理 TX 短写。
 - 该桥接只在单 RX consumer、单 TX producer 边界内成立；通用 async read/write/flush 语义留给 M6。
+
+<!-- L21 --> ### M3 阻塞：echo task 不被唤醒
+
+**症状**：
+- ISR 正常触发（`ISR=0xC4`，`LSR=0x61` 确认 DATA_READY）
+- RX copier 正常 unblock（`task unblock: Task(4, "uart-rx-copier")`）
+- copier push data 到 RX ring → 调用 `ArceOsWakerSet::wake()` → 理应唤醒 echo task
+- **但 echo task 从未恢复运行**：12+ 次 IRQ 均无 `echoed=N` 输出，终端无回显
+- 诊断探头显示 `wake_count` 始终为 0，说明 `wake()` 可能未被调用或 waker 为 None
+
+**排查方向**：
+1. 验证 `receive_bytes()` 是否真的返回 >0（RX copier 的 `push_batch` 是否被执行）
+2. 验证 echo task 的 waker 是否被正确注册到 `ArceOsWakerSet`
+3. 验证 `RingBufRx::push_batch` → `poll.wake()` 调用链是否一致（同一个 WakerSet 实例）
+4. 参考 StarryOS L17（TCP serial 时序 trap）排除 QEMU 输入路径问题
+
+**排查日期**：2026-06-19
