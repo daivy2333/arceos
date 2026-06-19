@@ -2,8 +2,8 @@
 
 记录 arceos 开发过程中的学习记忆(API 路径、踩坑档案、技巧模式、文件速查),避免重复探索,加速问题定位与决策。
 
-> Version: 0.2.1  
-> Last updated: 2026-06-19 (M1-T1.3 RED Gate PASS：P04 修复执行记录 + L11 四条件验证)  
+> Version: 0.2.3  
+> Last updated: 2026-06-19 (M2 验证收尾: L18 丢失唤醒 + L19 RR 测试根因诊断 + optimization O04)  
 > Scope: 全项目(workspace)
 
 ## Requirements
@@ -442,3 +442,60 @@ QEMU `-serial tcp:...` 配合 `nc` 做自动化字节注入时，有三个致命
 3. **端口复用**：多次重启 QEMU 时，tcp server 需要 `server=on,wait=off` 否则端口被占用
 
 正确做法：**不要用 tick 阈值做自动化测试的时间基准**。要么用真实的 RISC-V mtime CSR（10MHz 定时器），要么用外部 expect/pexpect 脚本等待特定输出字符串后再注入字节。
+
+<!-- L18 --> ### block_on 丢失唤醒竞态窗口（已修复）
+
+**症状**：Future 返回 Pending 后任务永久阻塞，即使 Waker 已被调用。在 `test_future_block_on_wake_from_peer` 等竞态测试中表现为挂起（不完成）。
+
+**根因**：`block_on` 的唤醒握手存在竞态窗口：
+
+```
+// ❌ 错误顺序
+drop(woke_guard);       // 释放锁 → 竞态窗口打开
+rq.block_current();     // set_state(Blocked) 在锁释放之后
+```
+
+竞态链条：
+1. Waker 获取 `woke` 锁 → 设 `woke = true` → 调用 `unblock_task`
+2. 但 `unblock_task` 依赖任务已处于 `Blocked` 状态才能转换 `Blocked → Ready`
+3. 此时任务仍是 `Running` → `unblock_task` 为 NO-OP
+4. `block_current` 随后设 `Blocked` → 任务永久阻塞
+5. 下一轮循环开头 `*woke.lock() = false` 覆盖唤醒标志 → 证据丢失
+
+**解决**：匹配 `blocked_resched` 的现有模式 — **持锁改状态，放锁后切换**：
+
+```rust
+// ✅ 正确顺序
+curr.set_state(TaskState::Blocked);  // 持锁改状态（woke_guard 仍在）
+drop(woke_guard);                     // 放锁
+self.inner.resched();                 // 切换 -> 上下文切换
+```
+
+关键约束：`woke_guard` 必须跨越 `set_state(Blocked)` 以阻止 Waker 的 `unblock_task` 在 NO-OP 窗口执行；但必须在 `resched()` 前释放以避免 Waker 在等待锁时死锁。
+
+**修改文件**：`modules/axtask/src/run_queue.rs` (`block_current` 签名改为 `fn block_current(&mut self, woke_guard: SpinNoIrqGuard<'_, bool>)`)
+
+**预防**：任何新增的阻塞原语如果不由 WaitQueue 保护，必须：1) 在状态迁移期间持有 Waker 可观察的同步原语；2) 在调用 `resched()` 前显式释放该原语以避免跨上下文切换持有锁。
+
+<!-- L19 --> ### axtask RR 调度器测试在用户态全量失败的根因
+
+**症状**：
+- `cargo test -p axtask --features "sched-rr"` 4 个既有测试全部失败
+- `test_wait_queue` / `test_task_join` → `assertion failed: curr.can_preempt(2)`
+- `test_sched_fifo` / `test_fp_state_switch` → `SIGABRT: failed to initiate panic, error 5`
+
+**根因**：**不是 RR 调度器本身有 bug**，而是用户态测试基础设施不支持 `preempt`。
+
+依赖链：`sched-rr → preempt → irq → kernel_guard/preempt → percpu/preempt`
+
+`blocked_resched` 中 `can_preempt(2)` 断言的期望是：
+- 1 层来自 `NoPreemptIrqSave`（run queue guard）
+- 1 层来自 `SpinNoIrq`（wait queue lock）
+
+用户态测试使用 `percpu/sp-naive`（单处理器 naive 实现），该实现在跨 `resched()` 上下文切换后无法正确追踪抢占计数的累加/递减，导致计数不匹配。`SIGABRT` 的 root cause 相同——panic handler 的 console 输出路径也可能经过 `blocked_resched` 或在持锁状态下触发二次 panic。
+
+**为什么 `block_on` 不受影响**：M2 的 `block_current` 不走 `blocked_resched`，不经过 WaitQueue 路径，不触发该断言。6 个 future 测试在 RR 下全部通过。
+
+**影响范围**：仅限 `cargo test` 用户态环境；QEMU/bare-metal 的 RR 调度不受影响。
+
+**诊断日期**：2026-06-19（M2 验证期间发现）

@@ -44,6 +44,7 @@ cfg_if::cfg_if! {
         mod task_ext;
         mod api;
         mod wait_queue;
+        mod future;
 
         #[cfg(feature = "irq")]
         mod timers;
@@ -51,6 +52,7 @@ cfg_if::cfg_if! {
         #[doc(cfg(feature = "multitask"))]
         pub use self::api::*;
         pub use self::api::{sleep, sleep_until, yield_now};
+        pub use self::future::block_on;
     } else {
         mod api_s;
         pub use self::api_s::{sleep, sleep_until, yield_now};

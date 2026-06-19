@@ -1,4 +1,5 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::task::{Poll, Waker};
 use std::sync::{Mutex, Once};
 
 use crate::{WaitQueue, api as axtask, current};
@@ -127,4 +128,132 @@ fn test_task_join() {
     for i in 0..NUM_TASKS {
         assert_eq!(tasks[i].join(), Some(i as _));
     }
+}
+
+#[test]
+fn test_future_block_on_immediate_ready() {
+    let _lock = SERIAL.lock();
+    INIT.call_once(axtask::init_scheduler);
+
+    let result = crate::block_on(async { 42u32 });
+    assert_eq!(result, 42);
+}
+
+#[test]
+fn test_future_block_on_multi_pending() {
+    let _lock = SERIAL.lock();
+    INIT.call_once(axtask::init_scheduler);
+
+    static POLL_COUNT: AtomicUsize = AtomicUsize::new(0);
+    const TARGET: usize = 5;
+
+    POLL_COUNT.store(0, Ordering::Relaxed);
+
+    let result = crate::block_on(core::future::poll_fn(|cx| {
+        let count = POLL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+        if count >= TARGET {
+            Poll::Ready(count)
+        } else {
+            let w = cx.waker().clone();
+            axtask::spawn(move || {
+                axtask::yield_now();
+                w.wake();
+            });
+            Poll::Pending
+        }
+    }));
+
+    assert_eq!(result, TARGET);
+    assert!(POLL_COUNT.load(Ordering::Relaxed) >= TARGET);
+}
+
+#[test]
+fn test_future_block_on_wake_from_peer() {
+    let _lock = SERIAL.lock();
+    INIT.call_once(axtask::init_scheduler);
+
+    static FLAG: AtomicBool = AtomicBool::new(false);
+    static WAKER: Mutex<Option<Waker>> = Mutex::new(None);
+
+    FLAG.store(false, Ordering::Relaxed);
+
+    let result = crate::block_on(core::future::poll_fn(|cx| {
+        if FLAG.load(Ordering::Relaxed) {
+            Poll::Ready(true)
+        } else {
+            *WAKER.lock().unwrap() = Some(cx.waker().clone());
+            axtask::spawn(|| {
+                FLAG.store(true, Ordering::Relaxed);
+                let w = WAKER.lock().unwrap().take().unwrap();
+                w.wake();
+            });
+            Poll::Pending
+        }
+    }));
+
+    assert!(result);
+}
+
+#[test]
+fn test_future_block_on_self_wake() {
+    let _lock = SERIAL.lock();
+    INIT.call_once(axtask::init_scheduler);
+
+    static POLL_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static WAKER: Mutex<Option<Waker>> = Mutex::new(None);
+
+    POLL_COUNT.store(0, Ordering::Relaxed);
+
+    let result = crate::block_on(core::future::poll_fn(|cx| {
+        let count = POLL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+        if count >= 2 {
+            Poll::Ready(count)
+        } else {
+            *WAKER.lock().unwrap() = Some(cx.waker().clone());
+            let w = WAKER.lock().unwrap().clone().unwrap();
+            w.wake_by_ref();
+            Poll::Pending
+        }
+    }));
+
+    assert!(result >= 2);
+    assert!(POLL_COUNT.load(Ordering::Relaxed) >= 2);
+}
+
+#[test]
+fn test_future_block_on_duplicate_wake() {
+    let _lock = SERIAL.lock();
+    INIT.call_once(axtask::init_scheduler);
+
+    static WAKER: Mutex<Option<Waker>> = Mutex::new(None);
+
+    let result = crate::block_on(core::future::poll_fn(|cx| {
+        *WAKER.lock().unwrap() = Some(cx.waker().clone());
+        let w = WAKER.lock().unwrap().clone().unwrap();
+        w.wake_by_ref();
+        w.wake_by_ref();
+        w.wake_by_ref();
+        Poll::Ready(99u32)
+    }));
+
+    assert_eq!(result, 99);
+}
+
+#[test]
+fn test_future_block_on_expired_waker() {
+    let _lock = SERIAL.lock();
+    INIT.call_once(axtask::init_scheduler);
+
+    static WAKER: Mutex<Option<Waker>> = Mutex::new(None);
+
+    crate::block_on(async {
+        let w = crate::current().clone();
+        let waker_data = alloc::sync::Arc::new(crate::future::AxWaker::new(alloc::sync::Arc::downgrade(&w)));
+        *WAKER.lock().unwrap() = Some(waker_data.into_raw_waker());
+    });
+
+    let waker = WAKER.lock().unwrap().take().unwrap();
+    waker.wake_by_ref();
+    waker.clone().wake();
+    drop(waker);
 }

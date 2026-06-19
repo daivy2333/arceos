@@ -436,6 +436,20 @@ impl<G: BaseGuard> CurrentRunQueueRef<'_, G> {
         }
     }
 
+    /// Block the current task for async future polling.
+    ///
+    /// Sets [`TaskState::Blocked`] while `woke_guard` is held (to prevent lost wake),
+    /// drops the guard, then calls `resched()` (to prevent waker deadlock).
+    /// The waker uses [`AxRunQueueRef::unblock_task`] directly to wake the task.
+    pub(crate) fn block_current(&mut self, woke_guard: kspin::SpinNoIrqGuard<'_, bool>) {
+        let curr = &self.current_task;
+        assert!(curr.is_running());
+        curr.set_state(TaskState::Blocked);
+        drop(woke_guard);
+        debug!("task block (future): {}", curr.id_name());
+        self.inner.resched();
+    }
+
     pub fn set_current_priority(&mut self, prio: isize) -> bool {
         self.inner
             .scheduler
