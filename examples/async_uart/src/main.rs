@@ -105,11 +105,20 @@ async fn echo_loop(driver: &'static adapter::Driver) {
 
         if total % 64 < n || total % 64 == 0 {
             let irq = adapter::IRQ_COUNT.load(Ordering::Relaxed);
+            let rx = adapter::RX_BYTES.load(Ordering::Relaxed);
+            let wc = adapter::WAKE_CALLED.load(Ordering::Relaxed);
+            let wh = adapter::WAKE_HIT.load(Ordering::Relaxed);
 
-            sbi_puts("[async_uart] echoed=");
+            sbi_puts("[echo] total=");
             sbi_puts(usize_str(total));
             sbi_puts(" irq=");
             sbi_puts(usize_str(irq));
+            sbi_puts(" rx=");
+            sbi_puts(usize_str(rx));
+            sbi_puts(" wake=");
+            sbi_puts(usize_str(wc));
+            sbi_puts("/");
+            sbi_puts(usize_str(wh));
             sbi_puts("\n");
         }
     }

@@ -50,6 +50,9 @@ pub const UART_IRQ: usize = 10;
 // ── Counters (observability) ──────────────────────────────────────────
 
 pub static IRQ_COUNT: AtomicUsize = AtomicUsize::new(0);
+pub static WAKE_CALLED: AtomicUsize = AtomicUsize::new(0);
+pub static WAKE_HIT: AtomicUsize = AtomicUsize::new(0);
+pub static RX_BYTES: AtomicUsize = AtomicUsize::new(0);
 
 // ── OsRuntime adapter ─────────────────────────────────────────────────
 
@@ -96,9 +99,11 @@ impl OsWakerSet for ArceOsWakerSet {
     }
 
     fn wake(&self) -> u32 {
+        WAKE_CALLED.fetch_add(1, Ordering::Relaxed);
         let taken = self.waker.lock().take();
         match taken {
             Some(w) => {
+                WAKE_HIT.fetch_add(1, Ordering::Relaxed);
                 w.wake();
                 1
             }
@@ -137,7 +142,11 @@ impl ArceOsUartPort {
 
 impl UartPort for ArceOsUartPort {
     fn receive_bytes(&self, buf: &mut [u8]) -> usize {
-        self.inner.lock().receive_bytes(buf)
+        let n = self.inner.lock().receive_bytes(buf);
+        if n > 0 {
+            RX_BYTES.fetch_add(n, Ordering::Relaxed);
+        }
+        n
     }
 
     fn send_bytes(&self, buf: &[u8]) -> usize {
@@ -151,21 +160,59 @@ pub static CACHED_IER: AtomicU8 = AtomicU8::new(0);
 
 static UART_BASE: AtomicUsize = AtomicUsize::new(0);
 
+// ── SBI helpers (diagnostic) ──────────────────────────────────────────
+
+fn sbi_puts(s: &str) {
+    for &b in s.as_bytes() {
+        unsafe {
+            static mut BUF: [u8; 1] = [0];
+            BUF[0] = b;
+            let vaddr = core::ptr::addr_of_mut!(BUF) as usize;
+            let paddr = axhal::mem::virt_to_phys(memory_addr::va!(vaddr)).as_usize();
+            sbi_rt::console_write(sbi_rt::Physical::new(1, paddr, 0));
+        }
+    }
+}
+
+fn hex(mut n: usize) -> &'static str {
+    const CAP: usize = 18;
+    static mut B: [u8; CAP] = [0; CAP];
+    unsafe {
+        if n == 0 { B[0] = b'0'; return core::str::from_utf8_unchecked(&B[..1]); }
+        let mut i = CAP;
+        while n > 0 && i > 0 { i -= 1; B[i] = if (n & 0xf) < 10 { b'0' + (n & 0xf) as u8 } else { b'a' + (n & 0xf) as u8 - 10 }; n >>= 4; }
+        if i >= 2 { i -= 2; B[i] = b'x'; B[i+1] = b'0'; }
+        core::str::from_utf8_unchecked(&B[i..])
+    }
+}
+
 // ── IRQ trampoline ────────────────────────────────────────────────────
 
 pub fn irq_trampoline() {
     IRQ_COUNT.fetch_add(1, Ordering::Relaxed);
 
     let base = UART_BASE.load(Ordering::Relaxed);
-    if base == 0 {
-        return;
-    }
+    if base == 0 { return; }
+    let Some(base_ptr) = NonNull::new(base as *mut u8) else { return; };
 
-    let Some(base_ptr) = NonNull::new(base as *mut u8) else {
-        return;
-    };
+    let pre_isr = unsafe { core::ptr::read_volatile((base + 2) as *const u8) };
+    let pre_lsr = unsafe { core::ptr::read_volatile((base + 5) as *const u8) };
+    let pre_ier = CACHED_IER.load(Ordering::Relaxed);
 
     uart_16550::async_::isr::uart_isr_handler(UART_IRQ, base_ptr, &CACHED_IER);
+
+    let post_ier = CACHED_IER.load(Ordering::Relaxed);
+
+    if pre_isr & 0x0E != 0 {
+        sbi_puts("[irq] ISR="); sbi_puts(hex(pre_isr as usize));
+        sbi_puts(" LSR="); sbi_puts(hex(pre_lsr as usize));
+        sbi_puts(" IER:"); sbi_puts(hex(pre_ier as usize));
+        sbi_puts("->"); sbi_puts(hex(post_ier as usize));
+        sbi_puts(" rx="); sbi_puts(hex(RX_BYTES.load(Ordering::Relaxed)));
+        sbi_puts(" wake="); sbi_puts(hex(WAKE_CALLED.load(Ordering::Relaxed)));
+        sbi_puts("/"); sbi_puts(hex(WAKE_HIT.load(Ordering::Relaxed)));
+        sbi_puts("\n");
+    }
 }
 
 // ── Copier callbacks ──────────────────────────────────────────────────
