@@ -123,5 +123,6 @@ arceos 工作区可能包含子项目(如 StarryOS 上层、依赖的第三方 c
 <!-- R02 --> | ArceOS 当前串口与控制台设计 | `.claude/analysis/arceos-serial-design.md` | RISC-V SBI/x86 16550 后端、stdio 轮询链路、启动顺序与 PLIC 缺口 |
 <!-- R03 --> | uart_16550 异步串口集成方案 | `.claude/analysis/uart16550-async-integration.md` | ISR/copy task/ring/Future 机制审计、风险清单与分阶段 ArceOS 集成方案 |
 <!-- R04 --> | StarryOS 到 ArceOS 异步 UART 迁移路线 | `.claude/analysis/starry-to-arceos-async-uart-roadmap.md` | 已验证链路、版本能力差异、最小回移方案与 M0-M6 验收里程碑 |
+<!-- R05 --> | M1 UART IRQ probe 阻塞分析 | `.claude/analysis/m1-uart-irq-probe-blocker.md` | StoreFault 因果定位、stride/init/IRQ 清源缺陷及 RED/GREEN 解阻方案 |
 
-> 三份文档互相交叉引用，覆盖当前实现、驱动审计和迁移路线。
+> 四份文档互相交叉引用，覆盖当前实现、驱动审计、迁移路线和 M1 阻塞解法。

@@ -130,3 +130,13 @@ arceos SHALL 同时支持 Unikernel 模式(单地址空间,无 Linux 兼容)和�
 - **Decision**: 只回移两个前置能力：参考 0.3.1-pre.6 修复 platform 0.4.1 PLIC，参考 axtask 0.3 增加单 Future `block_on`；使用当前 per-IRQ register API；先在独立 `examples/async_uart` 复现单端口 parity，再进入 stdio 和通用设备模型。
 - **Impact**: 需要维护一个可修改的 platform fork/path patch，并为 `axtask` 增加少量 crate 内调度代码；PoC 明确限制单 reader/writer，但能最短路径验证 ArceOS 本体。
 - **Alternatives**: 整体升级到 ArceOS 0.3 preview（范围和回归面过大）；照搬 StarryOS TTY/VFS（与 unikernel 目标无关）；先硬化 uart_16550 再集成（推迟已验证闭环的复现）。
+
+<!-- A03 -->
+### ADR-007: 设备 IRQ Gate 必须基于平台硬件契约并在 handler 清除设备中断源
+
+- **Status**: Accepted
+- **Date**: 2026-06-19
+- **Context**: M1 RED probe 将 QEMU virt ns16550a 的 stride 误设为 4、在 IRQ 注册前执行越界 MMIO 写、未初始化 UART IER，且 handler 只计数不清除 RX level condition；这些夹具缺陷使 StoreFault 和后续 IRQ storm 都可能被误判为 PLIC 问题。
+- **Decision**: 设备 IRQ probe 必须显式使用平台提供的 base/IRQ/stride 契约；注册 handler 后才开启设备中断；handler 必须确认并清除设备侧中断原因。RED/GREEN 仅允许控制器实现变化，设备配置与输入刺激保持一致。
+- **Impact**: M1 probe 需要修正 stride、初始化顺序和 handler 行为；后续 NIC/Block IRQ Gate 也必须提供可重复刺激与设备侧 acknowledge，避免只验证 handler table。
+- **Alternatives**: 仅用原子计数作为 handler（不能防 level IRQ storm）；手写少量寄存器绕过驱动（掩盖平台参数错误）；继续以越界 MMIO fault 调试 PLIC（因果路径不成立）。
