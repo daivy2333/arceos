@@ -145,10 +145,9 @@ fn run_riscv() {
     }
     sbi_puts("[uart_irq] init ok (IER.DATA_READY + FCR trigger=1)\n");
 
-    // Main loop: periodically report IRQ counts via SBI console.
+    // Main loop: report IRQ count changes via SBI console.
     let mut last_irq: usize = 0;
     let mut last_rx: usize = 0;
-    let mut tick: u32 = 0;
     loop {
         let cur_irq = IRQ10_COUNT.load(Ordering::Relaxed);
         let cur_rx = RX_BYTE_COUNT.load(Ordering::Relaxed);
@@ -161,40 +160,12 @@ fn run_riscv() {
             last_irq = cur_irq;
             last_rx = cur_rx;
         }
-        tick = tick.wrapping_add(1);
-        if tick % 5_000_000 == 0 {
-            sbi_puts("[uart_irq] heartbeat tick=");
-            sbi_puts(u32_str(tick));
-            sbi_puts(" count=");
-            sbi_puts(usize_str(cur_irq));
-            sbi_puts(" rx=");
-            sbi_puts(usize_str(cur_rx));
-            sbi_puts("\n");
-        }
     }
 }
 
 /// Format a usize as decimal (no std, no alloc).
 fn usize_str(mut n: usize) -> &'static str {
     // Tiny ring buffer
-    const CAP: usize = 20;
-    static mut BUF: [u8; CAP] = [0; CAP];
-    unsafe {
-        if n == 0 {
-            BUF[0] = b'0';
-            return core::str::from_utf8_unchecked(&BUF[..1]);
-        }
-        let mut i = CAP;
-        while n > 0 && i > 0 {
-            i -= 1;
-            BUF[i] = b'0' + (n % 10) as u8;
-            n /= 10;
-        }
-        core::str::from_utf8_unchecked(&BUF[i..])
-    }
-}
-
-fn u32_str(mut n: u32) -> &'static str {
     const CAP: usize = 20;
     static mut BUF: [u8; CAP] = [0; CAP];
     unsafe {
