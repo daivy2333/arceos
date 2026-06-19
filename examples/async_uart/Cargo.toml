@@ -1,0 +1,23 @@
+[package]
+name = "arceos-async-uart"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "M3 async UART parity PoC — RX/TX copier + ring + block_on echo"
+
+[features]
+default = []
+
+[dependencies]
+axstd = { workspace = true, features = ["alloc", "irq", "multitask"] }
+axhal = { workspace = true, features = ["irq", "defplat"] }
+axconfig = { workspace = true }
+axtask = { workspace = true }
+kspin = "0.2"
+memory_addr = "0.4"
+uart_16550 = { path = "../../../uart_16550", features = ["async"] }
+embassy-hal-internal = "0.2"
+sbi-rt = "0.0.3"
+riscv = "0.13"
+critical-section = { version = "1.2", features = ["restore-state-u8"] }
