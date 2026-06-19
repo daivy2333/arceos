@@ -1,4 +1,7 @@
-//! TODO: PLIC
+//! PLIC-backed interrupt controller for RISC-V QEMU virt.
+//!
+//! CPU-side interrupts (S_TIMER, S_SOFT) are handled directly via scause.
+//! Device-side interrupts go through PLIC: claim → dispatch → complete.
 
 use axplat::irq::{HandlerTable, IpiTarget, IrqHandler, IrqIf};
 use core::sync::atomic::{AtomicPtr, Ordering};
@@ -60,9 +63,17 @@ struct IrqIfImpl;
 #[impl_interface]
 impl IrqIf for IrqIfImpl {
     /// Enables or disables the given IRQ.
-    fn set_enable(irq: usize, _enabled: bool) {
-        // TODO: set enable in PLIC
-        warn!("set_enable is not implemented for IRQ {}", irq);
+    fn set_enable(irq: usize, enabled: bool) {
+        with_cause!(
+            irq,
+            @S_TIMER => { /* CPU-side, no PLIC control */ },
+            @S_SOFT => { /* CPU-side, no PLIC control */ },
+            @S_EXT => { /* S_EXT as scause — not a per-device control */ },
+            @EX_IRQ => {
+                let ctx = crate::plic::current_context();
+                crate::plic::set_enable(irq, ctx, enabled);
+            }
+        )
     }
 
     /// Registers an IRQ handler for the given IRQ.
@@ -158,9 +169,19 @@ impl IrqIf for IrqIfImpl {
                 }
             },
             @S_EXT => {
-                // TODO: get IRQ number from PLIC
-                if !IRQ_HANDLER_TABLE.handle(0) {
-                    warn!("Unhandled IRQ {}", 0);
+                warn!("PLIC S_EXT trap entered");
+                let ctx = crate::plic::current_context();
+                warn!("PLIC claim ctx={}", ctx);
+                if let Some(src) = crate::plic::claim(ctx) {
+                    let irq = src.get() as usize;
+                    warn!("PLIC claimed irq={}", irq);
+                    if !IRQ_HANDLER_TABLE.handle(irq) {
+                        warn!("Unhandled IRQ {}", irq);
+                    }
+                    crate::plic::complete(ctx, src);
+                    warn!("PLIC completed irq={}", irq);
+                } else {
+                    warn!("PLIC spurious S_EXT (no source claimed)");
                 }
             },
             @EX_IRQ => {

@@ -383,3 +383,36 @@ UART RED/GREEN probe 必须同时满足：平台 stride/base/IRQ 正确；设备
 4. **双计数** — `IRQ10_COUNT`（分派次数）+ `RX_BYTE_COUNT`（消费字节）独立追踪，可区分「控制器分派」与「设备消费」
 
 RED 日志 `/tmp/m1-t1-3-red.log` 显示 6s 内 503~519 个 heartbeat 全部 `count=0 rx=0`，且保留 `set_enable is not implemented for IRQ 10` warning —— 此 warning 是 PLIC TODO 的预期信号，不是 probe 失败。GREEN 待 M1-T2.1 完成 PLIC 移植后重跑（应看到 host byte → `count++ & rx++` 且无 IRQ storm）。
+
+<!-- L12 --> ### PLIC 移植：MMIO 映射时序必须在 `init_later`
+
+`init_early` 在 axhal 内存管理之前执行，此时 PLIC VADDR（`0xffffffc00c000000`）尚未建立页表映射。尝试在 `init_early` 中调用 `phys_to_virt(PLIC_PADDR)` 虽然只是算术运算不会崩溃，但后续 `init_by_context()` 的 MMIO 写入会触发 StoreFault。必须将 `plic::init()` 和 `plic::init_percpu()` 移到 `init_later`（页表已就绪）。
+
+**2026-06-19 验证**: 初始实现在 `init_early` 中调用 `plic::init()` 导致 `IllegalInstruction` trap。移至 `init_later` 后 PLIC 初始化日志正常（`PLIC init base_vaddr=0xffffffc00c000000`）。
+
+<!-- L13 --> ### RISC-V `mhartid` CSR 在 S-mode 不可读
+
+`riscv::register::mhartid::read()` 在 QEMU virt S-mode 下触发 `IllegalInstruction` trap。`mhartid` 是 M-mode CSR，默认不委托给 S-mode。解决方案：使用 `init_percpu(cpu_id)` 的 `cpu_id` 参数替代 CSR 读取；对于 IRQ handler 中需要当前 context 的场景，在 `init_percpu` 时存入 `CURRENT_CONTEXT: AtomicUsize` 静态变量。
+
+**2026-06-19 验证**: `mhartid::read()` 在 S-mode 触发 panic；改用 `cpu_id` 参数传递后正常。
+
+<!-- L14 --> ### 16550 UART IRQ 需要 MCR.OUT2 + FCR trigger ≤ RX bytes
+
+`uart_16550::Config::default()` 正确设置了 `IER::DATA_READY`，但有两个隐藏条件：
+1. **MCR.OUT2**（bit 3）：16550 中断输出线必须通过 MCR.OUT2 使能。虽然 `Uart16550::init()` 已设置 `MCR::OUT_2_INT_ENABLE`（0.5.0），但禁用 FIFO 后可能需要手动确认。
+2. **FCR 触发级别**：`Config::DEFAULT` 使用 `FifoTriggerLevel::Fourteen`，RX FIFO 必须积满 14 字节才触发 IRQ。测试时只发 1-2 字节则 IRQ 永远不会触发。
+
+**2026-06-19 验证**: 初始 probe 用 `Config::default()` 时 `PLIC pending[10]=0`（IRQ 未触发），改 FCR=0x01（trigger=1 byte）后 `claim_reg=0x0A`（IRQ 触发成功）。
+
+<!-- L15 --> ### PLIC S_EXT trap 不触发的诊断路径
+
+S_EXT 中断不触发时的排查顺序：
+1. 读 UART LSR → 确认数据到达（排除输入路径问题）
+2. 读 PLIC claim 寄存器（`base + 0x200000 + ctx*0x1000 + 4`）→ 确认 PLIC 已注册 IRQ
+3. 读 UART IIR → 确认设备级中断状态
+4. 读 UART IER/MCR/FCR → 确认设备中断配置
+5. 读 PLIC priority/enable/threshold → 确认 PLIC 配置
+6. 读 `sie`/`sstatus` CSR → 确认中断使能
+7. 若以上均正确但 trap 不触发 → 排查 RISC-V `medeleg`/`mideleg` 委托或 PLIC target 配置
+
+**2026-06-19 当前状态**: 已通过步骤 1-6 全部验证，问题定位于步骤 7。PLIC 确认 pending IRQ=10（claim=0x0A），但 `handle_trap!(IRQ, scause)` 不触发。疑为 QEMU virt 的 PLIC 中断未正确委托到 S-mode。待排查。

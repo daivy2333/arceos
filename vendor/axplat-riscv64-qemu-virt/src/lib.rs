@@ -10,6 +10,8 @@ mod console;
 mod init;
 #[cfg(feature = "irq")]
 mod irq;
+#[cfg(feature = "irq")]
+mod plic;
 mod mem;
 mod power;
 mod time;

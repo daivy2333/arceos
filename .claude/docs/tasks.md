@@ -8,7 +8,7 @@
 | Milestone | 目标 | 依赖 | Gate | 状态 |
 |-----------|------|------|------|------|
 | M0 | 当前 ArceOS、uart_16550、StarryOS 已验证实现的证据链与迁移设计 | — | 三份分析文档 + ADR-005/006 | ✅ 完成 |
-| M1 | RISC-V PLIC 与 UART IRQ 10 基线 | M0 | claim/complete、enable/disable、无 IRQ storm | 🚧 实施中：3/15，T1.3 RED Gate PASS；T2.1 spec 已批准，待下次会话 writing-plans + 实施 |
+| M1 | RISC-V PLIC 与 UART IRQ 10 基线 | M0 | claim/complete、enable/disable、无 IRQ storm | 🚧 实施中：7/15（T2.1-T2.4 DONE；T3.1 S_EXT trap 不触发 BLOCKED） |
 | M2 | axtask 单 Future `block_on` 基线 | M0 | Pending 真阻塞、wake 恢复、竞态不丢唤醒 | 📋 4/4 artifacts 完成，实施任务 0/14 |
 | M3 | `examples/async_uart` 复现 StarryOS parity | M1 + M2 | RX/TX copier + ring 双向 echo | 待办 |
 | M4 | QEMU 稳定性 Gate | M3 | 10 分钟压力、20 次启动、空闲无轮询 | 待办 |
@@ -21,7 +21,7 @@
 
 | ID | 主题 | 分支 | 关联 Change | 状态 |
 |----|------|------|-------------|------|
-| **M1-T2.1** | PLIC 移植 — `riscv_plic 0.2.0` + per-hart context | async-uart-1 | `m1-riscv-plic-baseline` | 📋 spec 已批准（76ce89a）；下次会话起点：writing-plans skill → 用户 approve → 实施 |
+| **M1-T3.1** | PLIC GREEN 验证 — S_EXT trap 不触发 | async-uart-1 | `m1-riscv-plic-baseline` | 🔴 BLOCKED：PLIC 确认 pending IRQ 10 但 hart 收不到 S_EXT；可能根因: medeleg/mideleg 委托或 PLIC target 配置 |
 
 ## 阻塞(Blocked)
 

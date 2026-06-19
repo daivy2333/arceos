@@ -77,6 +77,12 @@ version = "0.4"
 [dependencies.riscv]
 version = "0.16"
 
+[dependencies.riscv_plic]
+version = "0.2"
+
+[dependencies.kspin]
+version = "0.2"
+
 [dependencies.riscv_goldfish]
 version = "0.1"
 optional = true

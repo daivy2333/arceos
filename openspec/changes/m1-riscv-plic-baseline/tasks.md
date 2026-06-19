@@ -7,10 +7,14 @@
 
 ## 2. PLIC 核心
 
-- [ ] 2.1 [依赖: 1.3] 添加 `riscv_plic 0.2.0`、PLIC base 和 per-hart supervisor context 计算；验收：RISC-V 单核与 SMP 配置编译通过
-- [ ] 2.2 [依赖: 2.1] 实现每 hart `init_percpu()` context 初始化；验收：BSP/AP context 测试或启动日志与预期 context 一致
-- [ ] 2.3 [依赖: 2.2] 实现设备 source priority 与 enable/disable，显式忽略 IRQ 0；验收：IRQ 10 bit 状态场景通过
-- [ ] 2.4 [依赖: 2.3] 实现 S_EXT claim、无锁 handler dispatch、complete 和 spurious 分支；验收：handler 执行期间不持有 PLIC lock
+- [x] 2.1 [依赖: 1.3] 添加 `riscv_plic 0.2.0`、PLIC base 和 per-hart supervisor context 计算；验收：RISC-V 单核与 SMP 配置编译通过
+  - **2026-06-19 完成**：`plic.rs` 模块创建，`riscv_plic` + `kspin` 依赖添加，`plic-paddr` 配置，SMP=1/4 编译 0 警告
+- [x] 2.2 [依赖: 2.1] 实现每 hart `init_percpu()` context 初始化；验收：BSP/AP context 测试或启动日志与预期 context 一致
+  - **2026-06-19 完成**：`init_early→init_later` 时序修正（避免早期 MMIO 未映射），日志确认 ctx=1
+- [x] 2.3 [依赖: 2.2] 实现设备 source priority 与 enable/disable，显式忽略 IRQ 0；验收：IRQ 10 bit 状态场景通过
+  - **2026-06-19 完成**：日志确认 `PLIC enable source=10 ctx=1 prio=1`
+- [x] 2.4 [依赖: 2.3] 实现 S_EXT claim、无锁 handler dispatch、complete 和 spurious 分支；验收：handler 执行期间不持有 PLIC lock
+  - **2026-06-19 完成**：irq.rs `handle(S_EXT)` 改写为 claim→dispatch→complete；锁在 handler 外
 
 ## 3. 生命周期与边界测试
 
