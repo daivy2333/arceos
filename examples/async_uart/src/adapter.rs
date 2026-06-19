@@ -173,12 +173,22 @@ pub fn irq_trampoline() {
 
 fn enable_rx_intr() {
     let ier = CACHED_IER.load(Ordering::Relaxed);
-    CACHED_IER.store(ier | uart_16550::spec::registers::IER::DATA_READY.bits(), Ordering::Relaxed);
+    let new_val = ier | uart_16550::spec::registers::IER::DATA_READY.bits();
+    CACHED_IER.store(new_val, Ordering::Relaxed);
+    let base = UART_BASE.load(Ordering::Relaxed);
+    if base != 0 {
+        unsafe { core::ptr::write_volatile((base + 1) as *mut u8, new_val); }
+    }
 }
 
 fn enable_tx_intr() {
     let ier = CACHED_IER.load(Ordering::Relaxed);
-    CACHED_IER.store(ier | uart_16550::spec::registers::IER::THR_EMPTY.bits(), Ordering::Relaxed);
+    let new_val = ier | uart_16550::spec::registers::IER::THR_EMPTY.bits();
+    CACHED_IER.store(new_val, Ordering::Relaxed);
+    let base = UART_BASE.load(Ordering::Relaxed);
+    if base != 0 {
+        unsafe { core::ptr::write_volatile((base + 1) as *mut u8, new_val); }
+    }
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────
