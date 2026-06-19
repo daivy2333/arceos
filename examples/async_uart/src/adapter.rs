@@ -151,6 +151,46 @@ pub static CACHED_IER: AtomicU8 = AtomicU8::new(0);
 
 static UART_BASE: AtomicUsize = AtomicUsize::new(0);
 
+// ── SBI console helpers ───────────────────────────────────────────────
+
+#[cfg(target_arch = "riscv64")]
+pub fn sbi_puts(s: &str) {
+    for &b in s.as_bytes() {
+        unsafe {
+            static mut BUF: [u8; 1] = [0];
+            BUF[0] = b;
+            let vaddr = core::ptr::addr_of_mut!(BUF) as usize;
+            let paddr = axhal::mem::virt_to_phys(memory_addr::va!(vaddr)).as_usize();
+            sbi_rt::console_write(sbi_rt::Physical::new(1, paddr, 0));
+        }
+    }
+}
+
+#[cfg(target_arch = "riscv64")]
+pub fn hex_str(mut n: usize) -> &'static str {
+    const CAP: usize = 18;
+    static mut BUF: [u8; CAP] = [0; CAP];
+    unsafe {
+        if n == 0 {
+            BUF[0] = b'0';
+            return core::str::from_utf8_unchecked(&BUF[..1]);
+        }
+        let mut i = CAP;
+        while n > 0 && i > 0 {
+            i -= 1;
+            let d = (n & 0xf) as u8;
+            BUF[i] = if d < 10 { b'0' + d } else { b'a' + d - 10 };
+            n >>= 4;
+        }
+        if i >= 2 {
+            i -= 2;
+            BUF[i] = b'x';
+            BUF[i + 1] = b'0';
+        }
+        core::str::from_utf8_unchecked(&BUF[i..])
+    }
+}
+
 // ── IRQ trampoline ────────────────────────────────────────────────────
 
 pub fn irq_trampoline() {
@@ -166,7 +206,28 @@ pub fn irq_trampoline() {
         None => return,
     };
 
+    // Diagnostic: read ISR and LSR before handler
+    let pre_isr = unsafe { core::ptr::read_volatile((base + 2) as *const u8) };
+    let pre_lsr = unsafe { core::ptr::read_volatile((base + 5) as *const u8) };
+    let pre_ier = CACHED_IER.load(Ordering::Relaxed);
+
     uart_16550::async_::isr::uart_isr_handler(UART_IRQ, base_ptr, &CACHED_IER);
+
+    let post_ier = CACHED_IER.load(Ordering::Relaxed);
+
+    // Only log on actual RX interrupts (ISR bit 2 = ReceivedDataReady = 0x04,
+    // or bit 6 = RX timeout = 0x0C after priority decode)
+    if pre_isr & 0x0E != 0 {
+        sbi_puts("[irq] ISR=");
+        sbi_puts(hex_str(pre_isr as usize));
+        sbi_puts(" LSR=");
+        sbi_puts(hex_str(pre_lsr as usize));
+        sbi_puts(" IER: ");
+        sbi_puts(hex_str(pre_ier as usize));
+        sbi_puts(" -> ");
+        sbi_puts(hex_str(post_ier as usize));
+        sbi_puts("\n");
+    }
 }
 
 // ── Copier callbacks ──────────────────────────────────────────────────
