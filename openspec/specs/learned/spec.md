@@ -424,3 +424,21 @@ S_EXT 中断不触发时的排查顺序：
 - 仅在直接依赖项上启用 `axhal/irq`，只会编译 HAL IRQ API 和平台实现；不会启用 runtime 的 timer handler 注册及全局 `enable_irqs()`。
 - 诊断方法：`cargo tree -e features -i axruntime` 必须出现 `axruntime feature "irq"`，运行日志必须出现 `Initialize interrupt handlers...`。
 - PLIC claim register 是有副作用的 claim 操作，主循环诊断不得轮询它；使用 pending bitmap 和 CSR 做无侵入观察。
+
+**2026-06-19 M1 GREEN Gate 最终验证**:
+- `examples/uart_irq/Cargo.toml` 添加 `axstd/irq` 后，启动日志出现 `Initialize interrupt handlers...`
+- 注入 "HELLO" (5B) → IRQ10 count=5 rx=5；注入 "0123456789" (10B) → count=10；注入 64B → count=64
+- T4.1 SBI console 回归：`examples/helloworld` 正常输出 "Hello, world!"
+- T4.2 1B/64B loop：10×10B→count=10 一致；64B→count=64 一致
+- T4.3 idle 12s：count=0，无 spurious loop，无 panic
+- T4.4 build matrix：x86_64/aarch64/loongarch64 全部编译通过
+- M1 commit: `081680f` (14/15 tasks)
+
+<!-- L17 --> ### QEMU TCP serial 自动化测试的时序 trap
+
+QEMU `-serial tcp:...` 配合 `nc` 做自动化字节注入时，有三个致命问题：
+1. **tick 速率不稳定**：CPU loop counter（`tick.wrapping_add(1)`）速率 ~100M ticks/s，且每次 QEMU 启动略有不同，不能用于精确时钟阈值
+2. **字节到达延迟**：`nc -N` 发送字节到 TCP socket 后，可能要数秒才被 QEMU 转发到 guest UART，期间 guest 已经跑过数十亿 tick
+3. **端口复用**：多次重启 QEMU 时，tcp server 需要 `server=on,wait=off` 否则端口被占用
+
+正确做法：**不要用 tick 阈值做自动化测试的时间基准**。要么用真实的 RISC-V mtime CSR（10MHz 定时器），要么用外部 expect/pexpect 脚本等待特定输出字符串后再注入字节。

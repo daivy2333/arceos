@@ -8,7 +8,7 @@
 | Milestone | 目标 | 依赖 | Gate | 状态 |
 |-----------|------|------|------|------|
 | M0 | 当前 ArceOS、uart_16550、StarryOS 已验证实现的证据链与迁移设计 | — | 三份分析文档 + ADR-005/006 | ✅ 完成 |
-| M1 | RISC-V PLIC 与 UART IRQ 10 基线 | M0 | claim/complete、enable/disable、无 IRQ storm | 🚧 14/15（GREEN Gate PASS；T4.5 review+rollback 待完成） |
+| M1 | RISC-V PLIC 与 UART IRQ 10 基线 | M0 | claim/complete、enable/disable、无 IRQ storm | ✅ 完成（15/15 GREEN Gate PASS） |
 | M2 | axtask 单 Future `block_on` 基线 | M0 | Pending 真阻塞、wake 恢复、竞态不丢唤醒 | 📋 4/4 artifacts 完成，实施任务 0/14 |
 | M3 | `examples/async_uart` 复现 StarryOS parity | M1 + M2 | RX/TX copier + ring 双向 echo | 待办 |
 | M4 | QEMU 稳定性 Gate | M3 | 10 分钟压力、20 次启动、空闲无轮询 | 待办 |
@@ -21,7 +21,7 @@
 
 | ID | 主题 | 分支 | 关联 Change | 状态 |
 |----|------|------|-------------|------|
-| **M1-T4.5** | M1 Gate 收尾 — review + rollback 演练 | async-uart-1 | `m1-riscv-plic-baseline` | 📋 T4.1-T4.4 全部 PASS；T4.5 review + rollback 待实施 |
+| — | — | — | — | — |
 
 ## 阻塞(Blocked)
 
@@ -62,6 +62,7 @@
 <!-- T-003 --> | axhal/axplat 中断链审计 | 2026-06-19 | 确认当前 platform 0.4.1 PLIC TODO，并定位 0.3.1-pre.6 可移植实现 |
 <!-- T-004 --> | axtask Future 唤醒点调研 | 2026-06-19 | 确认 0.2 调度原语可承载 0.3 单 Future block_on 回移 |
 | D-004 | StarryOS 已验证路径反向迁移分析 | 2026-06-19 | QEMU 已验证链路、版本差异、最小能力回移方案已记录 |
+| **M1** | RISC-V PLIC & UART IRQ 10 baseline (15/15) | 2026-06-19 | GREEN Gate PASS: 10B→count=10, 64B→count=64; SBI console/idle/build matrix OK |
 | **M1-T1.3** | uart_irq probe RED 验证 | 2026-06-19 | 修复 4 处缺陷（stride 4→1、删除越界诊断写、添加 `uart.init(Config::default())`、handler drain RBR）；6s 内 519 heartbeats `count=0 rx=0`，无 StoreFault/panic；日志 `/tmp/m1-t1-3-red.log` |
 
 ## 与 OpenSpec changes/ 同步说明

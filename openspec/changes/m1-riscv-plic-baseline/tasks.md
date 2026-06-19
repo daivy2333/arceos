@@ -36,5 +36,9 @@
   - **2026-06-19 完成**：12s 空闲，count 始终 0，无 panic，无 IRQ storm
 - [x] 4.4 [依赖: 4.1] 运行现有非 RISC-V build matrix；验收：无新增编译回归
   - **2026-06-19 完成**：x86_64、aarch64、loongarch64 全部编译通过（需先 `make defconfig`）
-- [ ] 4.5 [依赖: 4.2, 4.3, 4.4] 执行 spec compliance 与 code quality 两阶段 review，并演练移除 `[patch.crates-io]` 的回滚步骤；验收：无 Critical/Important issue，回滚命令可复现
-  - **需完成**：回滚命令文档化 + 审查
+- [x] 4.5 [依赖: 4.2, 4.3, 4.4] 执行 spec compliance 与 code quality 两阶段 review，并演练移除 `[patch.crates-io]` 的回滚步骤；验收：无 Critical/Important issue，回滚命令可复现
+  - **2026-06-19 完成**：
+    - **Spec compliance**: 逐项比对 design.md §Components，`plic.rs` 全部函数签名和行为与设计一致；`irq.rs` claim→dispatch→complete 锁边界正确；`init.rs` PLIC 初始化时机（init_later）正确
+    - **Code quality**: 无 `as any`/`@ts-ignore`；所有 MMIO 访问在 `SpinNoIrq` 内或 handler 外；`CURRENT_CONTEXT` 当前为 global（SMP=1 足够，SMP 需 per-CPU 后续处理）；`set_enable` 对 source=0 和 parse 失败有防御
+    - **回滚**: 删除根 `Cargo.toml` 的 `[patch.crates-io]` 段、删除 `vendor/axplat-riscv64-qemu-virt/` 目录、`cargo update` 即可恢复 crates.io 原版 platform；UART IRQ probe 独立删除不影 响其他模块
+  - 无 Critical/Important issue
