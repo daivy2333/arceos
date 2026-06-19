@@ -117,19 +117,16 @@ arceos/
 
 - **分支**: `async-uart-1`
 - **主题**: 异步串口(async UART)— 承接 README TODO 中「Interrupt driven device I/O」与「Async I/O」
-- **状态**: **M1 完成，15/15 GREEN Gate PASS**(2026-06-19)
-  - ✅ T1.1-T3.3：vendor patch + RED/GREEN 见证 + PLIC 核心 + 边界测试
-  - ✅ T4.1-T4.4：SBI console 回归 + 1B/64B loop + idle 稳定性 + 跨架构 build matrix
-  - ✅ T4.5：spec compliance review + rollback 演练
-  - ✅ 根因修复：`axstd/irq` feature gate（详见 `.claude/analysis/m1-sext-feature-gate-blocker.md`）
-  - ✅ M1 可进入 `openspec archive m1-riscv-plic-baseline`
+- **状态**: **M1 已归档** ✅（2026-06-19）
+  - `openspec archive m1-riscv-plic-baseline` → `openspec/changes/archive/2026-06-19-m1-riscv-plic-baseline/`
+  - 新增 spec：`openspec/specs/riscv-plic-device-irq/spec.md`（5 Requirement）
 
 ## 当前关键差异
 
 | 能力 | StarryOS 已验证基线 | 当前 ArceOS | 迁移动作 |
 |------|--------------------|-------------|----------|
-| PLIC | platform 0.3.1-pre.6 完整 claim/complete | platform 0.4.1 TODO | 建立可修改 platform 载体并移植 |
-| Future | axtask 0.3 `future::block_on` | axtask 0.2 无 Future 模块 | 回移最小 block_on + 竞态测试 |
+| PLIC | platform 0.3.1-pre.6 完整 claim/complete | ✅ **已完成** — vendor 0.4.1 + riscv_plic 0.2.0 | M1 已归档 |
+| Future | axtask 0.3 `future::block_on` | axtask 0.2 无 Future 模块 | M2 回移最小 block_on + 竞态测试 |
 | IRQ 接入 | 全局 `register_irq_hook` | per-IRQ `register(irq, fn())` | 使用当前 API，不回移 hook |
 | readiness | axpoll + StarryOS TTY | stdio yield-poll | M5 再接入，不阻塞 PoC |
 | console | MMIO console 与 async path 共存 | SBI console | 保留 SBI early/fallback |
