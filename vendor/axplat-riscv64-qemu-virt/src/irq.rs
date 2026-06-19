@@ -169,19 +169,15 @@ impl IrqIf for IrqIfImpl {
                 }
             },
             @S_EXT => {
-                warn!("PLIC S_EXT trap entered");
                 let ctx = crate::plic::current_context();
-                warn!("PLIC claim ctx={}", ctx);
                 if let Some(src) = crate::plic::claim(ctx) {
                     let irq = src.get() as usize;
-                    warn!("PLIC claimed irq={}", irq);
                     if !IRQ_HANDLER_TABLE.handle(irq) {
                         warn!("Unhandled IRQ {}", irq);
                     }
                     crate::plic::complete(ctx, src);
-                    warn!("PLIC completed irq={}", irq);
                 } else {
-                    warn!("PLIC spurious S_EXT (no source claimed)");
+                    warn!("spurious S_EXT");
                 }
             },
             @EX_IRQ => {

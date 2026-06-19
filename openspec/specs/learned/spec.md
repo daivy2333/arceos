@@ -404,7 +404,7 @@ RED 日志 `/tmp/m1-t1-3-red.log` 显示 6s 内 503~519 个 heartbeat 全部 `co
 
 **2026-06-19 验证**: 初始 probe 用 `Config::default()` 时 `PLIC pending[10]=0`（IRQ 未触发），改 FCR=0x01（trigger=1 byte）后 `claim_reg=0x0A`（IRQ 触发成功）。
 
-<!-- L15 --> ### PLIC S_EXT trap 不触发的诊断路径
+<!-- L15 --> ### PLIC S_EXT trap 不触发：先检查顶层 feature 是否开启全局 SIE
 
 S_EXT 中断不触发时的排查顺序：
 1. 读 UART LSR → 确认数据到达（排除输入路径问题）
@@ -412,7 +412,15 @@ S_EXT 中断不触发时的排查顺序：
 3. 读 UART IIR → 确认设备级中断状态
 4. 读 UART IER/MCR/FCR → 确认设备中断配置
 5. 读 PLIC priority/enable/threshold → 确认 PLIC 配置
-6. 读 `sie`/`sstatus` CSR → 确认中断使能
-7. 若以上均正确但 trap 不触发 → 排查 RISC-V `medeleg`/`mideleg` 委托或 PLIC target 配置
+6. 读 `sie`/`sstatus` CSR → 必须同时满足 `sie.SEIE=1` 与 `sstatus.SIE=1`
+7. 检查应用 feature graph → `axhal/irq` 只提供 HAL 能力，不会自动启用 `axruntime/irq`
+8. 仅当以上均正确但 trap 不触发时，再排查 PLIC target/QEMU wiring
 
-**2026-06-19 当前状态**: 已通过步骤 1-6 全部验证，问题定位于步骤 7。PLIC 确认 pending IRQ=10（claim=0x0A），但 `handle_trap!(IRQ, scause)` 不触发。疑为 QEMU virt 的 PLIC 中断未正确委托到 S-mode。待排查。
+**2026-06-19 根因修正**：OpenSBI 日志 `MIDELEG=0x1666` 已包含 SEIP bit 9，委托正常。`examples/uart_irq` 只启用 `axhal/irq`，未启用 `axstd/irq -> axfeat/irq -> axruntime/irq`；因此 `axruntime::init_interrupt()` 未编译，启动日志缺少 `Initialize interrupt handlers...`，最终 `axhal::asm::enable_irqs()` 未执行、`sstatus.SIE=0`。手工读取 claim register 得到 10 只能证明设备到 PLIC context 的路径，并且该读取会消费 claim。
+
+<!-- L16 --> ### ArceOS IRQ feature 必须从顶层能力入口传播
+
+- 应用需要中断时优先启用 `axstd/irq`（或等价的 `axfeat/irq`），其传播链为 `axstd/irq -> axfeat/irq -> axhal/irq + axruntime/irq + axtask?/irq`。
+- 仅在直接依赖项上启用 `axhal/irq`，只会编译 HAL IRQ API 和平台实现；不会启用 runtime 的 timer handler 注册及全局 `enable_irqs()`。
+- 诊断方法：`cargo tree -e features -i axruntime` 必须出现 `axruntime feature "irq"`，运行日志必须出现 `Initialize interrupt handlers...`。
+- PLIC claim register 是有副作用的 claim 操作，主循环诊断不得轮询它；使用 pending bitmap 和 CSR 做无侵入观察。

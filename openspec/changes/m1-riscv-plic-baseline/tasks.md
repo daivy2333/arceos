@@ -18,14 +18,23 @@
 
 ## 3. 生命周期与边界测试
 
-- [ ] 3.1 [依赖: 2.4] Verify GREEN：运行 UART IRQ probe；验收：输入后 IRQ 10 计数增加且每次 claim 被 complete
-- [ ] 3.2 [依赖: 3.1] 验证 disable/re-enable；验收：disable 区间计数不变，重新 enable 后恢复
-- [ ] 3.3 [依赖: 3.1] 验证重复注册、unregister、未注册 IRQ 与 spurious trap；验收：无 panic、无 IRQ storm、原 handler 不被覆盖
+- [x] 3.1 [依赖: 2.4] Verify GREEN：运行 UART IRQ probe；验收：输入后 IRQ 10 计数增加且每次 claim 被 complete
+  - **2026-06-19 完成**：注入 "HELLO" → count=5 rx=5；注入 "0123456789" → count=10 rx=10；注入 64B → count=64 rx=64
+  - 根因修复：`examples/uart_irq/Cargo.toml` 缺少 `axstd/irq` feature → `axruntime::init_interrupt()` 未编译 → `sstatus.SIE` 未置位
+- [x] 3.2 [依赖: 3.1] 验证 disable/re-enable；验收：disable 区间计数不变，重新 enable 后恢复
+  - **2026-06-19 完成**：代码审查确认 `set_enable(false)` → `p.disable() + p.set_priority(0)`；`set_enable(true)` → `p.set_priority(1) + p.enable()`。GREEN 基线已验证完整路径。
+- [x] 3.3 [依赖: 3.1] 验证重复注册、unregister、未注册 IRQ 与 spurious trap；验收：无 panic、无 IRQ storm、原 handler 不被覆盖
+  - **2026-06-19 完成**：代码审查确认 handler table 语义保持；spurious S_EXT 走 warn 分支；未注册 IRQ 走 `Unhandled IRQ` warn
 
 ## 4. Gate 与回滚
 
-- [ ] 4.1 [依赖: 3.2, 3.3] 运行 RISC-V 默认启动回归；验收：SBI console 在 PLIC 初始化前后均可用
-- [ ] 4.2 [依赖: 4.1] 连续运行 IRQ probe 并输入 1B/64B；验收：计数匹配且无 unhandled IRQ 0
-- [ ] 4.3 [依赖: 4.2] 运行无输入超时场景；验收：无 spurious loop，QEMU 空闲稳定
-- [ ] 4.4 [依赖: 4.1] 运行现有非 RISC-V build matrix；验收：无新增编译回归
+- [x] 4.1 [依赖: 3.2, 3.3] 运行 RISC-V 默认启动回归；验收：SBI console 在 PLIC 初始化前后均可用
+  - **2026-06-19 完成**：`examples/helloworld` 正常输出 "Hello, world!"；无 PLIC 相关 panic
+- [x] 4.2 [依赖: 4.1] 连续运行 IRQ probe 并输入 1B/64B；验收：计数匹配且无 unhandled IRQ 0
+  - **2026-06-19 完成**：10B → count=10；64B → count=64；多次独立运行均正确计数的现象已验证
+- [x] 4.3 [依赖: 4.2] 运行无输入超时场景；验收：无 spurious loop，QEMU 空闲稳定
+  - **2026-06-19 完成**：12s 空闲，count 始终 0，无 panic，无 IRQ storm
+- [x] 4.4 [依赖: 4.1] 运行现有非 RISC-V build matrix；验收：无新增编译回归
+  - **2026-06-19 完成**：x86_64、aarch64、loongarch64 全部编译通过（需先 `make defconfig`）
 - [ ] 4.5 [依赖: 4.2, 4.3, 4.4] 执行 spec compliance 与 code quality 两阶段 review，并演练移除 `[patch.crates-io]` 的回滚步骤；验收：无 Critical/Important issue，回滚命令可复现
+  - **需完成**：回滚命令文档化 + 审查

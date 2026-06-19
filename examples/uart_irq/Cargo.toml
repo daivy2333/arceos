@@ -10,7 +10,7 @@ description = "M1 PLIC baseline probe — register IRQ 10 and count fires."
 default = []
 
 [dependencies]
-axstd = { workspace = true, features = ["alloc"] }
+axstd = { workspace = true, features = ["alloc", "irq"] }
 axhal = { workspace = true, features = ["irq", "defplat"] }
 axconfig = { workspace = true }
 uart_16550 = "0.5"

@@ -30,21 +30,17 @@ pub fn current_context() -> usize {
 
 pub fn init() {
     let base_vaddr = phys_to_virt(pa!(PLIC_PADDR)).as_usize();
-    warn!("PLIC init base_vaddr=0x{:x}", base_vaddr);
     let base = NonNull::new(base_vaddr as *mut PLICRegs)
         .expect("PLIC base must be non-null");
     *PLIC.lock() = Some(unsafe { Plic::new(base) });
-    warn!("PLIC initialized");
 }
 
 pub fn init_percpu(hart_id: usize) {
     let ctx = s_mode_context(hart_id);
-    warn!("PLIC init_percpu hart_id={} ctx={}", hart_id, ctx);
     CURRENT_CONTEXT.store(ctx, Ordering::Relaxed);
     let mut guard = PLIC.lock();
     if let Some(p) = guard.as_mut() {
         p.init_by_context(ctx);
-        warn!("PLIC init_by_context ctx={} done", ctx);
     }
 }
 
@@ -58,17 +54,14 @@ pub fn set_enable(source: usize, ctx: usize, enabled: bool) {
     };
     let mut guard = PLIC.lock();
     let Some(p) = guard.as_mut() else {
-        warn!("PLIC set_enable: PLIC not initialized");
         return;
     };
     if enabled {
         p.set_priority(src, ACTIVE_PRIORITY);
         p.enable(src, ctx);
-        warn!("PLIC enable source={} ctx={} prio={}", source, ctx, ACTIVE_PRIORITY);
     } else {
         p.disable(src, ctx);
         p.set_priority(src, 0);
-        warn!("PLIC disable source={} ctx={}", source, ctx);
     }
 }
 

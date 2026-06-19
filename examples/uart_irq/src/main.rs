@@ -132,33 +132,20 @@ fn run_riscv() {
     set_enable(plat::UART_IRQ, true);
     sbi_puts("[uart_irq] set_enable(10,true) called\n");
 
-    // Initialize UART with default config (IER.DATA_READY=1, FIFO enabled).
+    // Initialize UART to enable IER.DATA_READY so the device actually
+    // produces level-triggered RX IRQ 10 on host byte input. Without this,
+    // the device never raises IRQ 10 and the probe cannot validate PLIC
+    // even after it is implemented.
     uart.init(Config::default()).expect("UART init must succeed on QEMU virt");
-    // Override FIFO trigger level to 1 byte so IRQ fires immediately.
-    // FCR (write offset 2): bit0=enable FIFO, bits7-6=00→RX trigger 1.
+    // Override FIFO trigger level to 1 byte so IRQ fires on the first byte.
+    // QEMU's ns16550a requires MCR.OUT2 to drive the IRQ line, which
+    // uart_16550::init() already sets via MCR::OUT_2_INT_ENABLE.
     unsafe {
-        ptr::write_volatile((uart_vaddr + 2) as *mut u8, 0x01);
+        ptr::write_volatile((uart_vaddr + 2) as *mut u8, 0x01); // FCR: enable FIFO, RX trigger=1
     }
-    // Set MCR OUT2 (bit 3) to enable the 16550 interrupt output line.
-    // Without OUT2, the UART will not drive the IRQ line even if IER and
-    // pending conditions are met.
-    unsafe {
-        ptr::write_volatile((uart_vaddr + 4) as *mut u8, 0x0B); // MCR: OUT2=1, RTS=1, DTR=1
-    }
-    // Diagnostic: read back UART registers after init
-    let ier_val = unsafe { ptr::read_volatile((uart_vaddr + 1) as *const u8) };
-    let mcr_val = unsafe { ptr::read_volatile((uart_vaddr + 4) as *const u8) };
-    let iir_val = unsafe { ptr::read_volatile((uart_vaddr + 2) as *const u8) };
-    sbi_puts("[uart_irq] regs: IER=0x");
-    sbi_puts(hex8(ier_val));
-    sbi_puts(" MCR=0x");
-    sbi_puts(hex8(mcr_val));
-    sbi_puts(" IIR=0x");
-    sbi_puts(hex8(iir_val));
-    sbi_puts("\n");
-    sbi_puts("[uart_irq] init ok (IER.DATA_READY + MCR.OUT2 enabled)\n");
+    sbi_puts("[uart_irq] init ok (IER.DATA_READY + FCR trigger=1)\n");
 
-    // Main loop: periodically report both counters via SBI console.
+    // Main loop: periodically report IRQ counts via SBI console.
     let mut last_irq: usize = 0;
     let mut last_rx: usize = 0;
     let mut tick: u32 = 0;
@@ -240,21 +227,12 @@ fn hex_str(mut n: usize) -> &'static str {
             BUF[i] = if d < 10 { b'0' + d } else { b'a' + d - 10 };
             n >>= 4;
         }
+        // 0x prefix
         if i >= 2 {
             i -= 2;
             BUF[i] = b'x';
             BUF[i + 1] = b'0';
         }
         core::str::from_utf8_unchecked(&BUF[i..])
-    }
-}
-
-fn hex8(n: u8) -> &'static str {
-    static mut BUF: [u8; 4] = [b'0', b'x', b'0', b'0'];
-    unsafe {
-        let ptr = core::ptr::addr_of_mut!(BUF);
-        (*ptr)[2] = b"0123456789abcdef"[(n >> 4) as usize];
-        (*ptr)[3] = b"0123456789abcdef"[(n & 0xf) as usize];
-        core::str::from_utf8_unchecked(&*ptr)
     }
 }

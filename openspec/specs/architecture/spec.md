@@ -140,3 +140,13 @@ arceos SHALL 同时支持 Unikernel 模式(单地址空间,无 Linux 兼容)和�
 - **Decision**: 设备 IRQ probe 必须显式使用平台提供的 base/IRQ/stride 契约；注册 handler 后才开启设备中断；handler 必须确认并清除设备侧中断原因。RED/GREEN 仅允许控制器实现变化，设备配置与输入刺激保持一致。
 - **Impact**: M1 probe 需要修正 stride、初始化顺序和 handler 行为；后续 NIC/Block IRQ Gate 也必须提供可重复刺激与设备侧 acknowledge，避免只验证 handler table。
 - **Alternatives**: 仅用原子计数作为 handler（不能防 level IRQ storm）；手写少量寄存器绕过驱动（掩盖平台参数错误）；继续以越界 MMIO fault 调试 PLIC（因果路径不成立）。
+
+<!-- A04 -->
+### ADR-008: 应用通过顶层 feature 启用 IRQ 生命周期，不在平台或 probe 中直接开启全局中断
+
+- **Status**: Accepted
+- **Date**: 2026-06-19
+- **Context**: M1 probe 直接启用 `axhal/irq` 后，平台成功设置 `sie.SEIE` 和 PLIC source/context，但 `axruntime/irq` 未启用，导致 `init_interrupt()` 与全局 `sstatus.SIE` enable 缺失。设备到 PLIC 已成立，却无法进入 S_EXT trap。
+- **Decision**: ArceOS 应用需要 IRQ 时必须通过 `axstd/irq` 或 `axfeat/irq` 传播到 `axruntime/irq`；平台层只负责 per-hart interrupt enable 和控制器配置。probe 不得直接调用 `enable_irqs()` 绕过 runtime 生命周期。
+- **Impact**: IRQ 测试夹具必须验证 Cargo feature graph 和 runtime 初始化日志；可确保 timer handler、全局 enable 与设备 IRQ 使用统一顺序。低层独立 crate 测试仍可显式启用 `axhal/irq`，但不能据此宣称完整 runtime IRQ 可用。
+- **Alternatives**: 在 platform `init_later()` 直接设置 `sstatus.SIE`（开启时机过早且绕过 runtime handler 初始化）；在 probe main 中手工开启全局中断（测试不再代表真实应用配置）；让 `axhal/irq` 反向依赖 runtime（违反分层）。
