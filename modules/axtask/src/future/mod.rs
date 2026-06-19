@@ -75,21 +75,20 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
             Poll::Pending => {}
         }
 
+        // Acquire rq BEFORE woke_guard so that NoPreemptIrqSave (SIE=0)
+        // outlives the SpinNoIrq lock. When block_current drops woke_guard,
+        // its SpinNoIrq::drop restores saved state — but rq's NoPreemptIrqSave
+        // already saved SIE=0 at its own acquire, so IRQs stay disabled.
+        let mut rq = current_run_queue::<kernel_guard::NoPreemptIrqSave>();
         let woke_guard = waker_data.woke.lock();
         if *woke_guard {
             drop(woke_guard);
+            drop(rq);
             yield_now();
         } else {
-            let mut rq = current_run_queue::<kernel_guard::NoPreemptIrqSave>();
-            if *woke_guard {
-                drop(woke_guard);
-                drop(rq);
-                yield_now();
-            } else {
-                // woke_guard held during set_state to prevent lost wake,
-                // then dropped BEFORE resched to prevent waker deadlock.
-                rq.block_current(woke_guard);
-            }
+            // woke_guard held during set_state to prevent lost wake,
+            // then dropped BEFORE resched to prevent waker deadlock.
+            rq.block_current(woke_guard);
         }
     }
 }
