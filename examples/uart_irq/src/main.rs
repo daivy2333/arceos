@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-#[macro_use]
 extern crate axstd as std;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -12,24 +11,59 @@ use uart_16550::Config;
 #[cfg(target_arch = "riscv64")]
 use uart_16550::Uart16550;
 
-/// QEMU virt machine constants (not yet exposed by axconfig::devices).
+/// QEMU virt machine constants (per hardware contract, not driver defaults).
 #[cfg(target_arch = "riscv64")]
 mod plat {
     /// 16550 UART0 MMIO base on QEMU virt.
     pub const UART_PADDR: usize = 0x1000_0000;
-    /// Stride between adjacent UART registers.
-    pub const UART_STRIDE: u8 = 4;
+    /// Stride between adjacent UART registers. QEMU virt's device tree exposes
+    /// the UART as `ns16550a` with no `reg-shift` property, so logical register
+    /// offsets map to consecutive byte addresses. Using `4` would make logical
+    /// FCR (offset 2) land at physical offset 8, which is past the 8-byte
+    /// device window and triggers StoreFault on first `init()` write.
+    pub const UART_STRIDE: u8 = 1;
     /// PLIC source number for UART0 RX on QEMU virt.
     pub const UART_IRQ: usize = 10;
 }
 
-/// Atomic counter for IRQ 10 firings. Updated from the handler, read from main.
+/// Handler-entry counter (PLIC dispatch count).
 static IRQ10_COUNT: AtomicUsize = AtomicUsize::new(0);
+/// Bytes drained from RBR by the handler (level-triggered clear count).
+/// 16550 RX IRQ is level-triggered on LSR.DATA_READY; without draining RBR
+/// in the handler, PLIC would re-fire after complete and cause IRQ storm.
+static RX_BYTE_COUNT: AtomicUsize = AtomicUsize::new(0);
+/// Kernel VA of UART MMIO base. Set by `run_riscv` before IRQ register,
+/// read by the handler to drain RBR / inspect IIR / inspect LSR.
+static UART_VADDR: AtomicUsize = AtomicUsize::new(0);
 
-/// Trap handler. axplat 0.4 `IrqHandler = fn()` (no argument), so the handler
-/// must match that signature.
+/// Trap handler. `axplat 0.4 IrqHandler = fn()` (no argument), so the handler
+/// must match that signature. Drains RBR to clear the UART's level-triggered
+/// RX condition so PLIC won't re-fire after complete.
 fn irq10_handler() {
     IRQ10_COUNT.fetch_add(1, Ordering::Relaxed);
+
+    let base = UART_VADDR.load(Ordering::Relaxed);
+    if base == 0 {
+        return;
+    }
+
+    // SAFETY: `base` is the kernel VA of the UART MMIO region mapped W=R.
+    // 16550 register offsets: IIR=2 (RO), LSR=5 (RO), RBR=0 (RO).
+    unsafe {
+        // Identify interrupt reason via IIR (read-only; clears the IIR read).
+        let _iir = ptr::read_volatile((base + 2) as *const u8);
+        // Drain all available bytes while LSR.DATA_READY (bit 0) is set.
+        let mut drained = 0usize;
+        loop {
+            let lsr = ptr::read_volatile((base + 5) as *const u8);
+            if lsr & 0x01 == 0 {
+                break;
+            }
+            let _byte = ptr::read_volatile(base as *const u8);
+            drained += 1;
+        }
+        RX_BYTE_COUNT.fetch_add(drained, Ordering::Relaxed);
+    }
 }
 
 /// Write a string to SBI console (byte-by-byte, no buffering).
@@ -73,149 +107,24 @@ fn run_riscv() {
     sbi_puts(hex_str(uart_vaddr));
     sbi_puts("\n");
 
-    // Direct MMIO write test: write 'A' to UART THR (offset 0).
-    let thr_addr = uart_vaddr as *mut u8;
-    unsafe {
-        ptr::write_volatile(thr_addr, b'A');
-    }
-    sbi_puts("[uart_irq] direct write 'A' to THR ok\n");
-
     // SAFETY: uart_vaddr points at the kernel-mapped 16550 MMIO region.
     let mut uart = unsafe {
-        Uart16550::new_mmio(thr_addr, plat::UART_STRIDE)
+        Uart16550::new_mmio(uart_vaddr as *mut u8, plat::UART_STRIDE)
             .expect("UART MMIO init must succeed on QEMU virt")
     };
     sbi_puts("[uart_irq] new_mmio ok\n");
 
-    // Dump the actual page table root from satp, then read the L2 entry that
-    // maps our VA range. This is the real source of truth — the boot PT
-    // described in axplat boot.rs is no longer the one in use after
-    // axmm::init_memory_management() runs.
-    unsafe {
-        let satp: usize;
-        core::arch::asm!("csrr {0}, satp", out(reg) satp);
-        sbi_puts("[uart_irq] satp=");
-        sbi_puts(hex_str(satp));
-        sbi_puts("\n");
-        // RV64 satp layout: MODE[63:60] | ASID[59:44] | PPN[43:0]
-        let mode = (satp >> 60) & 0xf;
-        let ppn = satp & ((1usize << 44) - 1);
-        let root_pa = ppn << 12;
-        sbi_puts("[uart_irq] mode=");
-        sbi_puts(usize_str(mode));
-        sbi_puts(" root_pa=");
-        sbi_puts(hex_str(root_pa));
-        sbi_puts("\n");
-
-        // Walk: VA 0xffffffc010000000
-        //   VPN[2] = (VA >> 30) & 0x1ff = 0x100
-        //   VPN[1] = (VA >> 21) & 0x1ff = (0x1000_0000 >> 21) & 0x1ff = 0x00
-        //   VPN[0] = (VA >> 12) & 0x1ff = (0x1000_0000 >> 12) & 0x1ff = 0x00
-        let root_va = axhal::mem::phys_to_virt(pa!(root_pa)).as_usize() as *const u64;
-        let l2_pte = ptr::read_volatile(root_va.add(0x100));
-        sbi_puts("[uart_irq] L2[0x100]=");
-        sbi_puts(hex_str(l2_pte as usize));
-        sbi_puts(" V=");
-        sbi_puts(if l2_pte & 1 != 0 { "1" } else { "0" });
-        sbi_puts(" R=");
-        sbi_puts(if l2_pte & 2 != 0 { "1" } else { "0" });
-        sbi_puts(" W=");
-        sbi_puts(if l2_pte & 4 != 0 { "1" } else { "0" });
-        sbi_puts(" X=");
-        sbi_puts(if l2_pte & 8 != 0 { "1" } else { "0" });
-        sbi_puts("\n");
-
-        // If L2 is non-leaf (V=1 but R=X=0), walk down to L1.
-        let l2_is_leaf = (l2_pte & 0xf) == 0x1 || (l2_pte & 0xa) != 0;
-        sbi_puts("[uart_irq] L2 is_leaf=");
-        sbi_puts(if l2_is_leaf { "yes" } else { "no" });
-        sbi_puts("\n");
-
-        // Walk L1 and L0 for the UART range regardless, to see if any
-        // override exists (the page table may not implement non-leaf override
-        // but checking is cheap).
-        // L2 PPN bits: PPN[2] = bits 53-28 of PTE (for 1G block at level 2).
-        // L2 points to L1 if non-leaf. Treat it as non-leaf pointer either way.
-        let l1_pa = ((l2_pte as usize >> 10) & 0x0fff_ffff_ffff) << 12;
-        sbi_puts("[uart_irq] L1 phys=");
-        sbi_puts(hex_str(l1_pa));
-        sbi_puts("\n");
-        if l1_pa != 0 {
-            let l1_va = axhal::mem::phys_to_virt(pa!(l1_pa)).as_usize() as *const u64;
-            for i in 0..4 {
-                let pte = ptr::read_volatile(l1_va.add(i));
-                if pte & 1 != 0 {
-                    sbi_puts("[uart_irq] L1[");
-                    sbi_puts(usize_str(i));
-                    sbi_puts("]=");
-                    sbi_puts(hex_str(pte as usize));
-                    sbi_puts(" V=");
-                    sbi_puts(if pte & 1 != 0 { "1" } else { "0" });
-                    sbi_puts(" R=");
-                    sbi_puts(if pte & 2 != 0 { "1" } else { "0" });
-                    sbi_puts(" W=");
-                    sbi_puts(if pte & 4 != 0 { "1" } else { "0" });
-                    sbi_puts(" X=");
-                    sbi_puts(if pte & 8 != 0 { "1" } else { "0" });
-                    sbi_puts("\n");
-                }
-            }
-        }
-    }
-    sbi_puts("[uart_irq] page table dump done\n");
-
-    sbi_puts("[uart_irq] page table dump done\n");
-
-    // Test write to PLIC MMIO (0xc00_0000) and try writing past PLIC's range.
-    let plic_paddr: usize = 0x0c00_0000;
-    let plic_vaddr = phys_to_virt(pa!(plic_paddr)).as_usize();
-    sbi_puts("[uart_irq] plic_vaddr=");
-    sbi_puts(hex_str(plic_vaddr));
-    sbi_puts("\n");
-    unsafe {
-        ptr::write_volatile(plic_vaddr as *mut u32, 0xdeadbeef);
-        sbi_puts("[uart_irq] write plic off=0 ok\n");
-        // PLIC size is 0x21_0000. Try past that.
-        ptr::write_volatile((plic_vaddr + 0x21_0000) as *mut u32, 0xdeadbeef);
-        sbi_puts("[uart_irq] write plic off=0x210000 ok\n");
-    }
-
-    // Test: try writing to UART + 0x1000 (4K page boundary)
-    unsafe {
-        ptr::write_volatile(thr_addr.add(0x1000), 0x01u8);
-        sbi_puts("[uart_irq] write uart off=0x1000 ok\n");
-    }
-
-    // Read scause and stval right before the failing write to diagnose.
-    let scause: usize;
-    let stval: usize;
-    let sscratch: usize;
-    unsafe {
-        core::arch::asm!(
-            "csrr {0}, scause",
-            "csrr {1}, stval",
-            "csrr {2}, sscratch",
-            out(reg) scause,
-            out(reg) stval,
-            out(reg) sscratch,
-        );
-    }
-    sbi_puts("[uart_irq] pre-write scause=");
-    sbi_puts(usize_str(scause));
-    sbi_puts(" stval=");
-    sbi_puts(hex_str(stval));
-    sbi_puts(" sscratch=");
-    sbi_puts(hex_str(sscratch));
-    sbi_puts("\n");
-
-    // Test: try writing to UART offset 8.
-    unsafe {
-        let addr8 = thr_addr.add(8);
-        ptr::write_volatile(addr8, 0x01u8);
-        sbi_puts("[uart_irq] write off=8 (precomp ptr) ok\n");
-    }
+    // Publish the kernel VA of the UART MMIO region for the handler BEFORE
+    // registering IRQ 10, so the handler can read IIR / LSR / RBR without
+    // borrowing `uart` and never early-returns if a stray IRQ fires after
+    // register but before init.
+    UART_VADDR.store(uart_vaddr, Ordering::Relaxed);
 
     // Register IRQ 10 handler via axhal facade.
+    // RED expected: `register` succeeds but `set_enable` only logs a warning
+    // because vendor axplat-riscv64-qemu-virt 0.4.1 has PLIC TODO. The handler
+    // therefore never fires; irq_count/rx_byte_count must stay at 0 until
+    // PLIC is implemented (M1 T2.1).
     let ok = register(plat::UART_IRQ, irq10_handler);
     sbi_puts("[uart_irq] register(10)=");
     sbi_puts(if ok { "true" } else { "false" });
@@ -223,30 +132,39 @@ fn run_riscv() {
     set_enable(plat::UART_IRQ, true);
     sbi_puts("[uart_irq] set_enable(10,true) called\n");
 
-    // Main loop: read UART, echo bytes, periodically report count via SBI.
-    let mut last_reported: usize = 0;
-    let mut buf = [0u8; 16];
+    // Initialize UART to enable IER.DATA_READY so the device actually
+    // produces level-triggered RX IRQ 10 on host byte input. Without this,
+    // the device never raises IRQ 10 and the probe cannot validate PLIC
+    // even after it is implemented.
+    uart.init(Config::default()).expect("UART init must succeed on QEMU virt");
+    sbi_puts("[uart_irq] init ok (IER.DATA_READY enabled)\n");
+
+    // Main loop: periodically report both counters via SBI console. Handler
+    // drains RBR, so we no longer poll the device here; that avoids racing
+    // with the handler over RX bytes during GREEN.
+    let mut last_irq: usize = 0;
+    let mut last_rx: usize = 0;
     let mut tick: u32 = 0;
     loop {
-        let n = uart.try_receive_bytes(&mut buf);
-        if n > 0 {
-            for &b in &buf[..n] {
-                let _ = uart.try_send_byte(b);
-            }
-        }
-        let cur = IRQ10_COUNT.load(Ordering::Relaxed);
-        if cur != last_reported {
+        let cur_irq = IRQ10_COUNT.load(Ordering::Relaxed);
+        let cur_rx = RX_BYTE_COUNT.load(Ordering::Relaxed);
+        if cur_irq != last_irq || cur_rx != last_rx {
             sbi_puts("[uart_irq] IRQ10 count=");
-            sbi_puts(usize_str(cur));
+            sbi_puts(usize_str(cur_irq));
+            sbi_puts(" rx_byte_count=");
+            sbi_puts(usize_str(cur_rx));
             sbi_puts("\n");
-            last_reported = cur;
+            last_irq = cur_irq;
+            last_rx = cur_rx;
         }
         tick = tick.wrapping_add(1);
         if tick % 5_000_000 == 0 {
             sbi_puts("[uart_irq] heartbeat tick=");
             sbi_puts(u32_str(tick));
             sbi_puts(" count=");
-            sbi_puts(usize_str(cur));
+            sbi_puts(usize_str(cur_irq));
+            sbi_puts(" rx=");
+            sbi_puts(usize_str(cur_rx));
             sbi_puts("\n");
         }
     }

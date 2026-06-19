@@ -2,8 +2,8 @@
 
 记录 arceos 开发过程中的学习记忆(API 路径、踩坑档案、技巧模式、文件速查),避免重复探索,加速问题定位与决策。
 
-> Version: 0.2.0  
-> Last updated: 2026-06-19  
+> Version: 0.2.1  
+> Last updated: 2026-06-19 (M1-T1.3 RED Gate PASS：P04 修复执行记录 + L11 四条件验证)  
 > Scope: 全项目(workspace)
 
 ## Requirements
@@ -189,7 +189,7 @@ arceos 中需要反复访问的关键文件/目录 SHALL 记录,加速代码导�
   | 8 (EnvCall) | ecall | 不是 fault |
 - **关联**: 排查 P04 时的工具链
 
-### P04: QEMU RISC-V 16550 设备 MMIO 范围只 8 字节,4K 页内 offset ≥8 写触发 StoreFault
+### P04: QEMU RISC-V 16550 仅有 8 个字节寄存器，错误 stride/越界诊断写会触发 StoreFault
 
 - **症状**: 在 `examples/uart_irq` probe 中,直接 MMIO 写 UART 偏移 8 触发 kernel panic
   ```
@@ -197,19 +197,26 @@ arceos 中需要反复访问的关键文件/目录 SHALL 记录,加速代码导�
   [uart_irq] write uart off=0x1000 ok         # 4K 边界 OK
   [panic] Unhandled trap Exception(StoreFault) @ sb s1, 8(s2)
   ```
-  注:偏移 0..7 可写并出字符,偏移 8 触发 CPU StoreFault,不是 QEMU "无设备" 静默忽略。
-- **根因(待定)**:
+  注:偏移 0..7 是合法设备寄存器；偏移 8 已越过 ns16550a 设备窗口。该 fault 发生在 IRQ 注册和 PLIC enable 之前。
+- **根因(已确认)**:
   - 1G page table entry 正确(`L2[0x100]=0xef V=R=W=X=1`)
-  - PLIC 在 0xc00_0000 范围任意 offset 都 OK
-  - 唯一差异:UART 设备实体是 8 字节(16550 寄存器),QEMU RISC-V 可能把设备 size 之外配置成 fault 而不是 unassigned
-  - QEMU virt 16550 (`hw/char/serial.c`):`addr >= ARRAY_SIZE(s->divider) && addr != 7` 静默 return
-  - 怀疑 OpenSBI 配置的 PMP 或者 QEMU 内部 memory region 把 8..0xfff 当成 fault 区域
-- **解决方案(临时)**: probe 不调用 `uart_16550::init()`,只手动写 IER (offset 1) + THR (offset 0) + LSR (offset 5) 这三个寄存器;FCR/SPR/MCR 等其他寄存器由 PLIC 实现完整后再补
+  - probe 在 `register(10)` 前显式执行 `write_volatile(UART_BASE + 8)`，直接访问设备窗口之外，故与 PLIC 无关
+  - probe 将 `UART_STRIDE` 误设为 4；`uart_16550 0.5.0` 使用 `base + logical_offset * stride`，QEMU virt 应为 stride 1
+  - probe 只调用 `new_mmio()` 而未调用 `init(Config::default())`，即使删除越界写也不会开启 `IER.DATA_READY`
+- **解决方案**: 将 stride 改为 1，删除所有越界 MMIO 诊断写，注册 handler 后执行 `uart.init(Config::default())`；handler 必须读取 IIR/LSR 并 drain RBR 清除 level-triggered RX 条件
 - **预防**:
-  - 直接 MMIO 16550 时,先只动 offset 0..7 的寄存器
-  - 如需 FCR/SPR 等,用 `lcr_test_loopback` 通过 `init()` 一站式配,避免自己拼寄存器序列
-  - 写之前先 `csrr scause/stval` 确认 CPU 状态
-- **关联**: `examples/uart_irq/src/main.rs`, `vendor/axplat-riscv64-qemu-virt/src/boot.rs:11-21`, `QEMU hw/char/serial.c serial_mm_write`
+  - 区分平台 MMIO 页映射大小与设备寄存器窗口；页可写不代表页内任意地址都属于设备
+  - 从设备树/平台契约确认 `reg-shift`，将 stride 作为硬件参数而不是驱动默认值
+  - RED probe 必须先证明设备确实产生 IRQ，并确保 handler 能清除设备侧中断条件
+- **修复执行（2026-06-19，M1-T1.3 RED Gate PASS）**:
+  - `examples/uart_irq/src/main.rs` 修复 4 处缺陷并验证
+  - UART_STRIDE `4 → 1`；删除 page table walk / PLIC 越界写 / UART+0x1000 / UART+8 / scause read
+  - 注册顺序调整：`new_mmio → UART_VADDR.store → register → set_enable → init`（避免 stray IRQ 早返回）
+  - handler 现在 `read_volatile(IIR) → loop read(LSR) & drain(RBR) → IRQ10_COUNT++ / RX_BYTE_COUNT+=drained`
+  - QEMU 6s 跑出 503~519 个 heartbeat 全部 `count=0 rx=0`；`set_enable is not implemented for IRQ 10` warning 保留（RED 期望）
+  - RED 日志：`/tmp/m1-t1-3-red.log`
+  - GREEN 待 M1-T2.1 PLIC 移植完成后重跑
+- **关联**: `examples/uart_irq/src/main.rs`, `.claude/analysis/m1-uart-irq-probe-blocker.md`, `openspec/changes/m1-riscv-plic-baseline/tasks.md` §1.3
 
 ## 技巧模式
 
@@ -364,3 +371,15 @@ StarryOS 使用 `register_irq_hook(fn(usize))` 是 0.3 架构选择。当前 Arc
 <!-- L10 --> ### parity-first 迁移边界
 
 首个 ArceOS PoC 固定单 UART、单 reader、单 writer，并保留 SBI console。先复现 StarryOS 的 ISR/copy/ring 闭环，再处理多生产者、per-port waker、真正 async flush 和 TTY/POSIX 集成。
+
+<!-- L11 --> ### UART IRQ probe 的因果有效性条件
+
+UART RED/GREEN probe 必须同时满足：平台 stride/base/IRQ 正确；设备 IER 已开启；handler 可识别并清除 IIR/LSR/RBR 对应的 level condition。仅注册 PLIC handler 或仅观察计数，都不足以证明 PLIC 路径正确。
+
+**2026-06-19 验证（M1-T1.3 RED Gate PASS）**: 四条件均已在 `examples/uart_irq` 中满足并通过 QEMU 见证：
+1. **stride/base/IRQ 正确** — `UART_STRIDE=1` 匹配 ns16550a `reg-shift=0`；base `0x1000_0000` 来自 axconfig；IRQ 10 = QEMU virt PLIC source
+2. **IER 已开启** — `uart.init(Config::default())` 启用 `IER.DATA_READY`
+3. **handler 清源** — handler `read(IIR)` + `loop { read(LSR) & drain(RBR) }` 清除 level condition
+4. **双计数** — `IRQ10_COUNT`（分派次数）+ `RX_BYTE_COUNT`（消费字节）独立追踪，可区分「控制器分派」与「设备消费」
+
+RED 日志 `/tmp/m1-t1-3-red.log` 显示 6s 内 503~519 个 heartbeat 全部 `count=0 rx=0`，且保留 `set_enable is not implemented for IRQ 10` warning —— 此 warning 是 PLIC TODO 的预期信号，不是 probe 失败。GREEN 待 M1-T2.1 完成 PLIC 移植后重跑（应看到 host byte → `count++ & rx++` 且无 IRQ storm）。

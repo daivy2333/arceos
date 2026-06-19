@@ -1,8 +1,9 @@
 ## 1. RED 见证与 vendor 基线
 
-- [ ] 1.1 [依赖: 无] 将 crates.io `axplat-riscv64-qemu-virt 0.4.1` 原样置于 `vendor/` 并配置 `[patch.crates-io]`；验收：未改逻辑时 RISC-V baseline build 与原依赖一致
-- [ ] 1.2 [依赖: 1.1] 新增仅启用同步 UART API 的 `examples/uart_irq` probe；验收：输出可解析的 IRQ 计数与 enable 状态
-- [ ] 1.3 [依赖: 1.2] Verify RED：在未实现 PLIC 时运行 probe；验收：保存 handler 未收到 IRQ 10 的失败证据和完整命令输出
+- [x] 1.1 [依赖: 无] 将 crates.io `axplat-riscv64-qemu-virt 0.4.1` 原样置于 `vendor/` 并配置 `[patch.crates-io]`；验收：未改逻辑时 RISC-V baseline build 与原依赖一致
+- [x] 1.2 [依赖: 1.1] 新增仅启用同步 UART API 的 `examples/uart_irq` probe；验收：输出可解析的 IRQ 计数与 enable 状态
+- [x] 1.3 [依赖: 1.2] Verify RED：先修正 QEMU virt stride=1、调用 `init(Config::default())` 并让 handler 清除 UART RX 中断源；在未实现 PLIC 时运行 probe；验收：无 StoreFault，保存 handler 未收到 IRQ 10 的失败证据和完整命令输出
+  - **2026-06-19 完成**：probe 修复 4 处缺陷（stride 4→1、删除越界诊断写、添加 `uart.init(Config::default())`、handler drain RBR + UART_VADDR atomic）；QEMU 6s 跑出 519 heartbeats `count=0 rx=0`，无 StoreFault/panic；RED 日志 `/tmp/m1-t1-3-red.log`
 
 ## 2. PLIC 核心
 
@@ -24,4 +25,3 @@
 - [ ] 4.3 [依赖: 4.2] 运行无输入超时场景；验收：无 spurious loop，QEMU 空闲稳定
 - [ ] 4.4 [依赖: 4.1] 运行现有非 RISC-V build matrix；验收：无新增编译回归
 - [ ] 4.5 [依赖: 4.2, 4.3, 4.4] 执行 spec compliance 与 code quality 两阶段 review，并演练移除 `[patch.crates-io]` 的回滚步骤；验收：无 Critical/Important issue，回滚命令可复现
-
