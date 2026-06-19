@@ -1,6 +1,6 @@
 # Tasks — arceos 全局任务追踪
 
-> Last updated: 2026-06-19 (M3 阻塞：IRQ→copier 链路通，echo task 未被唤醒)
+> Last updated: 2026-06-19 (M3 ✅ — echo 闭环验证通过，关键路径解锁 M4)
 > 与 `openspec/changes/` 双向同步:每个进行中的 change 都有对应 Task 编号
 
 ## Milestone 路线
@@ -10,7 +10,7 @@
 | M0 | 当前 ArceOS、uart_16550、StarryOS 已验证实现的证据链与迁移设计 | — | 三份分析文档 + ADR-005/006 | ✅ 完成 |
 | M1 | RISC-V PLIC 与 UART IRQ 10 基线 | M0 | claim/complete、enable/disable、无 IRQ storm | ✅ 完成（15/15 GREEN Gate PASS） |
 | M2 | axtask 单 Future `block_on` 基线 | M0 | Pending 真阻塞、wake 恢复、竞态不丢唤醒 | ✅ 完成（14/14 GREEN：10 tests pass + spec compliance + rollback） |
-| M3 | `examples/async_uart` 复现 StarryOS parity | M1 + M2 | RX/TX copier + ring 双向 echo | 🚧 阻塞 (M3-B1) |
+| M3 | `examples/async_uart` 复现 StarryOS parity | M1 + M2 | RX/TX copier + ring 双向 echo | ✅ 完成 (4 fixes, echo verified) |
 | M4 | QEMU 稳定性 Gate | M3 | 10 分钟压力、20 次启动、空闲无轮询 | 待办 |
 | M5 | ArceOS stdin/readiness/stdout 分阶段接入 | M4 | shell 输入无 yield-poll，SBI fallback 保留 | 待办 |
 | M6 | 驱动硬化与通用 bottom-half 模式 | M5 | SMP/并发契约、测试、性能基线 | 待办 |
@@ -21,7 +21,7 @@
 
 | ID | 主题 | 阻塞原因 | 解阻条件 |
 |----|------|----------|----------|
-| **M3-B1** | echo task 不被唤醒 | RX copier push→ring→wake 后 echo task 未恢复运行；12+ 次 IRQ 均无 `echoed=N` 输出 | ArceOsWakerSet 的 wake 链路验证通过（waker 注册/存储/通知/任务恢复） |
+| — | — | — | — |
 
 ## 进行中(In Progress)
 
@@ -71,7 +71,8 @@
 | **M1** | RISC-V PLIC & UART IRQ 10 baseline (15/15) | 2026-06-19 | GREEN Gate PASS: 10B→count=10, 64B→count=64; SBI console/idle/build matrix OK |
 | **M1-T1.3** | uart_irq probe RED 验证 | 2026-06-19 | 修复 4 处缺陷（stride 4→1、删除越界诊断写、添加 `uart.init(Config::default())`、handler drain RBR）；6s 内 519 heartbeats `count=0 rx=0`，无 StoreFault/panic；日志 `/tmp/m1-t1-3-red.log` |
 | **M2** | axtask future block_on 基线 (14/14) | 2026-06-19 | block_on + AxWaker + woke handshake + 6 tests GREEN + spec compliance + rollback；修复丢失唤醒竞态窗口；RR 测试预存问题诊断记录 |
-| **M3** | async UART parity (7/7) | 2026-06-19 | examples/async_uart: ArceOsRuntime + ArceOsWakerSet + UartPort adapter + RingBuffer + IRQ trampoline + bootstrap + ring-aware echo Future. Build GREEN. M1 regression ✅. Rollback: delete workspace member + dir. M4 ready. |
+| **M3** | async UART parity (4 fixes) | 2026-06-19 | echo 闭环验证通过。修复：block_on 锁顺序panic + IER 硬件回写 + embassy RingBuffer 零容量 + debug 噪音。learned L21/L22。 |
+| **M3-B1** | echo task 不唤醒（已解决） | 2026-06-19 | 根因：embassy RingBuffer::new() 零容量，未调用 init(ptr,4096)。修复后 wake 正常，echo 闭环通过。 |
 
 ## 与 OpenSpec changes/ 同步说明
 

@@ -1,7 +1,8 @@
 # M3 Tasks: `examples/async_uart`
 
 > Covers: T-012 (RED build), T-013 (adapter/bootstrap), T-014 (echo + idle gate)
-> Status: ✅ 7/7 complete
+> Status: ✅ 7/7 complete — echo 闭环验证通过 (2026-06-19)
+> 4 fixes: axtask block_on lock order, IER hw write, embassy RingBuffer init, debug noise
 
 ## Task 1 — T-012: RED Build Baseline ✅
 

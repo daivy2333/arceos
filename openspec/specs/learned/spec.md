@@ -512,19 +512,21 @@ self.inner.resched();                 // 切换 -> 上下文切换
 - M3 parity 应直接在公开 ring API 上实现 `pop/push → register waker → 二次检查 → Pending`，并循环处理 TX 短写。
 - 该桥接只在单 RX consumer、单 TX producer 边界内成立；通用 async read/write/flush 语义留给 M6。
 
-<!-- L21 --> ### M3 阻塞：echo task 不被唤醒
+<!-- L21 --> ### M3 echo task 不唤醒 — 已解决（embassy RingBuffer 零容量）
 
-**症状**：
-- ISR 正常触发（`ISR=0xC4`，`LSR=0x61` 确认 DATA_READY）
-- RX copier 正常 unblock（`task unblock: Task(4, "uart-rx-copier")`）
-- copier push data 到 RX ring → 调用 `ArceOsWakerSet::wake()` → 理应唤醒 echo task
-- **但 echo task 从未恢复运行**：12+ 次 IRQ 均无 `echoed=N` 输出，终端无回显
-- 诊断探头显示 `wake_count` 始终为 0，说明 `wake()` 可能未被调用或 waker 为 None
+**症状**：RX copier 收到数据（`rx` 计数器增长），但 `wake=0/0`——`ArceOsWakerSet::wake()` 从未被调用。echo task 永不恢复，终端无回显。
 
-**排查方向**：
-1. 验证 `receive_bytes()` 是否真的返回 >0（RX copier 的 `push_batch` 是否被执行）
-2. 验证 echo task 的 waker 是否被正确注册到 `ArceOsWakerSet`
-3. 验证 `RingBufRx::push_batch` → `poll.wake()` 调用链是否一致（同一个 WakerSet 实例）
-4. 参考 StarryOS L17（TCP serial 时序 trap）排除 QEMU 输入路径问题
+**根因**：`embassy_hal_internal::RingBuffer::new()` 创建零容量空壳（`buf=null, len=0`）。未 `init()` 时 `push()` 始终返回 0 → `push_batch` 中 `if n > 0` 不成立 → `self.poll.wake()` 跳过。
 
-**排查日期**：2026-06-19
+**解决**：bootstrap 中增加 `unsafe { ring.init(ptr, 4096) }` 分配静态 backing storage。
+
+**教训**：embassy `RingBuffer` 的两步初始化（`new()` + `init()`）是 API 陷阱——`new()` 返回可用对象但实际不可用。`RingBufRx::new()` 不检查 backing storage 是否已分配。
+
+<!-- L22 --> ### M3 踩坑合集 — 4 个问题全记录
+
+| # | 症状 | 根因 | 修复位置 |
+|---|------|------|----------|
+| 1 | panic: "IRQs must be disabled" | `block_on` 中 `woke_guard` 后于 `rq` 释放 → SIE 恢复 → `resched()` 时中断已开 | `axtask/future/mod.rs`：`rq` 先于 `woke_guard` |
+| 2 | 第二次输入起无 IRQ | `enable_rx_intr` 只写 CACHED_IER(AtomicU8)，未写硬件 IER 寄存器 | `adapter.rs`：增加 `write_volatile(base+1)` |
+| 3 | idle "waiting for IRQs" 刷屏 | `LOG=debug` 级别的 axtask WFI 心跳（~100Hz） | 改用 `LOG=info`；**禁止在调度路径加高频日志** |
+| 4 | echo 不回显、`wake=0/0` | embassy `RingBuffer` 零容量，未调用 `init()` | `adapter.rs`：bootstrap 中添加 `ring.init(ptr, 4096)` |
