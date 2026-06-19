@@ -1,0 +1,31 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Rust (nightly-2025-05-20, edition 2024), C, Make, Cargo workspace
+  Architecture: x86_64, riscv64, aarch64, loongarch64, armv7a
+  平台: QEMU pc-q35/virt (主),raspi4(可选)
+  License: GPL-3.0-or-later OR Apache-2.0 OR MulanPSL-2.0
+  项目结构: modules/(axhal/axdriver/axnet/axtask/axsync 等内核模块),
+           api/(arceos_api/arceos_posix_api/axfeat 用户态接口),
+           ulib/(axstd/axlibc 用户态库),examples/(helloworld/httpserver/shell 等示例)
+  当前主线: 中断驱动设备 I/O + 异步 I/O(对应 async-uart-1 分支:异步串口)
+  所有产出物必须用简体中文撰写,技术术语如 API/IRQ/DMA/UART 保持英文原样。
+  内核约束: no_std + no_main,关注中断安全、跨架构兼容、SMP 安全。
+
+rules:
+  proposal:
+    - 包含回滚方案
+    - 说明为什么做、做什么、不做什么
+    - 标注对中断安全/跨架构/SMP 的影响
+  specs:
+    - 使用 Given/When/Then 格式描述行为
+    - 每个 spec.md 包含版本号和最后更新日期
+    - 变更时使用 Delta Specs(ADDED/MODIFIED/REMOVED)
+  design:
+    - 复杂流程需包含序列图(文本框图)
+    - 标注关键依赖关系(模块依赖链)
+    - 包含备选方案对比
+  tasks:
+    - 每个任务可独立验证(编译/运行/测试)
+    - 标注依赖关系
+    - 包含验收标准

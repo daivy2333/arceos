@@ -158,6 +158,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "arceos-uart-irq"
+version = "0.1.0"
+dependencies = [
+ "axconfig",
+ "axhal",
+ "axstd",
+ "memory_addr",
+ "sbi-rt",
+ "uart_16550 0.5.0",
+]
+
+[[package]]
 name = "arceos_api"
 version = "0.2.0"
 dependencies = [
@@ -791,8 +803,6 @@ dependencies = [
 [[package]]
 name = "axplat-riscv64-qemu-virt"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb37d38bd7ca941ff97bd662971922e2e69cb42c26dde81fbc1fb881ade06654"
 dependencies = [
  "axconfig-macros",
  "axcpu",
@@ -821,7 +831,7 @@ dependencies = [
  "multiboot",
  "percpu",
  "raw-cpuid 11.6.0",
- "uart_16550",
+ "uart_16550 0.4.0",
  "x2apic",
  "x86",
  "x86_64",
@@ -2236,6 +2246,15 @@ dependencies = [
  "bitflags 2.11.1",
  "rustversion",
  "x86",
+]
+
+[[package]]
+name = "uart_16550"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71cceed8939ba6ebde9d1e8a603b3c7f1a239a3db22e1ff465ed71ddca7a7d66"
+dependencies = [
+ "bitflags 2.11.1",
 ]
 
 [[package]]

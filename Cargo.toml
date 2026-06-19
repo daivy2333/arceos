@@ -30,6 +30,7 @@ members = [
     "examples/httpclient",
     "examples/httpserver",
     "examples/shell",
+    "examples/uart_irq",
 ]
 
 [workspace.package]
@@ -69,3 +70,9 @@ axipi = { path = "modules/axipi" }
 
 [profile.release]
 lto = true
+
+# Vendor patch: axplat-riscv64-qemu-virt 0.4.1
+# M1 baseline — keep crate source identical to crates.io, only change resolution
+# so we can modify it for PLIC in T2.x without affecting other architectures.
+[patch.crates-io]
+axplat-riscv64-qemu-virt = { path = "vendor/axplat-riscv64-qemu-virt" }

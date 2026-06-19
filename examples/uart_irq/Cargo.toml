@@ -1,0 +1,18 @@
+[package]
+name = "arceos-uart-irq"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "M1 PLIC baseline probe — register IRQ 10 and count fires."
+
+[features]
+default = []
+
+[dependencies]
+axstd = { workspace = true, features = ["alloc"] }
+axhal = { workspace = true, features = ["irq", "defplat"] }
+axconfig = { workspace = true }
+uart_16550 = "0.5"
+memory_addr = "0.4"
+sbi-rt = "0.0.3"
