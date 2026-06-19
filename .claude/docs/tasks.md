@@ -1,6 +1,6 @@
 # Tasks — arceos 全局任务追踪
 
-> Last updated: 2026-06-19 (M1-T1.3 RED Gate PASS — probe 修复 4 处缺陷并保存 RED 日志)
+> Last updated: 2026-06-19 (今日 session 收尾：M1-T1.3 RED Gate PASS + T2.1..T4.5 设计 spec 已批准 commit 76ce89a)
 > 与 `openspec/changes/` 双向同步:每个进行中的 change 都有对应 Task 编号
 
 ## Milestone 路线
@@ -8,7 +8,7 @@
 | Milestone | 目标 | 依赖 | Gate | 状态 |
 |-----------|------|------|------|------|
 | M0 | 当前 ArceOS、uart_16550、StarryOS 已验证实现的证据链与迁移设计 | — | 三份分析文档 + ADR-005/006 | ✅ 完成 |
-| M1 | RISC-V PLIC 与 UART IRQ 10 基线 | M0 | claim/complete、enable/disable、无 IRQ storm | 🚧 实施中：3/15，T1.3 RED Gate PASS；T2.1 PLIC 移植待启动 |
+| M1 | RISC-V PLIC 与 UART IRQ 10 基线 | M0 | claim/complete、enable/disable、无 IRQ storm | 🚧 实施中：3/15，T1.3 RED Gate PASS；T2.1 spec 已批准，待下次会话 writing-plans + 实施 |
 | M2 | axtask 单 Future `block_on` 基线 | M0 | Pending 真阻塞、wake 恢复、竞态不丢唤醒 | 📋 4/4 artifacts 完成，实施任务 0/14 |
 | M3 | `examples/async_uart` 复现 StarryOS parity | M1 + M2 | RX/TX copier + ring 双向 echo | 待办 |
 | M4 | QEMU 稳定性 Gate | M3 | 10 分钟压力、20 次启动、空闲无轮询 | 待办 |
@@ -21,7 +21,7 @@
 
 | ID | 主题 | 分支 | 关联 Change | 状态 |
 |----|------|------|-------------|------|
-| **M1-T2.1** | PLIC 移植 — `riscv_plic 0.2.0` + per-hart context | async-uart-1 | `m1-riscv-plic-baseline` | 📋 待启动：T1.3 RED Gate 已通过；下一步 vendor PLIC 引入 |
+| **M1-T2.1** | PLIC 移植 — `riscv_plic 0.2.0` + per-hart context | async-uart-1 | `m1-riscv-plic-baseline` | 📋 spec 已批准（76ce89a）；下次会话起点：writing-plans skill → 用户 approve → 实施 |
 
 ## 阻塞(Blocked)
 
