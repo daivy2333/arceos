@@ -1,6 +1,6 @@
 # Tasks — arceos 全局任务追踪
 
-> Last updated: 2026-06-19 (M2 14/14 全部完成：block_on + 6 tests + spec compliance + 回滚验证)
+> Last updated: 2026-06-19 (M2 14/14 ✅ | M3 启动 — openspec change 已创建)
 > 与 `openspec/changes/` 双向同步:每个进行中的 change 都有对应 Task 编号
 
 ## Milestone 路线
@@ -10,7 +10,7 @@
 | M0 | 当前 ArceOS、uart_16550、StarryOS 已验证实现的证据链与迁移设计 | — | 三份分析文档 + ADR-005/006 | ✅ 完成 |
 | M1 | RISC-V PLIC 与 UART IRQ 10 基线 | M0 | claim/complete、enable/disable、无 IRQ storm | ✅ 完成（15/15 GREEN Gate PASS） |
 | M2 | axtask 单 Future `block_on` 基线 | M0 | Pending 真阻塞、wake 恢复、竞态不丢唤醒 | ✅ 完成（14/14 GREEN：10 tests pass + spec compliance + rollback） |
-| M3 | `examples/async_uart` 复现 StarryOS parity | M1 + M2 | RX/TX copier + ring 双向 echo | 待办 |
+| M3 | `examples/async_uart` 复现 StarryOS parity | M1 + M2 | RX/TX copier + ring 双向 echo | 🔄 进行中 |
 | M4 | QEMU 稳定性 Gate | M3 | 10 分钟压力、20 次启动、空闲无轮询 | 待办 |
 | M5 | ArceOS stdin/readiness/stdout 分阶段接入 | M4 | shell 输入无 yield-poll，SBI fallback 保留 | 待办 |
 | M6 | 驱动硬化与通用 bottom-half 模式 | M5 | SMP/并发契约、测试、性能基线 | 待办 |
@@ -21,7 +21,11 @@
 
 | ID | 主题 | 分支 | 关联 Change | 状态 |
 |----|------|------|-------------|------|
-| — | — | — | — | — |
+| **M3** | `examples/async_uart` async UART parity | async-uart-1 | `m3-async-uart-parity` | 🔄 T-012 RED build |
+
+| Milestone | 目标 | 依赖 | Gate | 状态 |
+|-----------|------|------|------|------|
+| M3 | `examples/async_uart` 复现 StarryOS parity | M1 + M2 | RX/TX copier + ring 双向 echo | 🔄 进行中 |
 
 ## 阻塞(Blocked)
 

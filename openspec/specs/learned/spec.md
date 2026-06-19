@@ -499,3 +499,15 @@ self.inner.resched();                 // 切换 -> 上下文切换
 **影响范围**：仅限 `cargo test` 用户态环境；QEMU/bare-metal 的 RR 调度不受影响。
 
 **诊断日期**：2026-06-19（M2 验证期间发现）
+
+<!-- L20 --> ### M3 使用 `axtask::block_on` 根路径与 `spawn_raw` 适配 copier
+
+- 当前 `modules/axtask/src/future/mod.rs` 是私有模块，`block_on` 只在 crate 根 re-export；StarryOS 的 `axtask::future::block_on` 路径不能原样复制。
+- `OsRuntime::spawn` 可映射为 `axtask::spawn_raw(move || axtask::block_on(future), name.into(), axconfig::TASK_STACK_SIZE)`，每个 copier 使用一个内核任务。
+- `examples/async_uart` 必须通过顶层 `axstd` 同时启用 `alloc + irq + multitask`，否则 allocator、scheduler 或全局 IRQ 生命周期不完整。
+
+<!-- L21 --> ### M3 echo 必须绕过当前非等待式 async device ops
+
+- `AsyncUartReader::read().await` 当前只 pop 一次，空 ring 返回 `Ok(0)`；`AsyncUartWriter::write().await` 允许短写，`flush()` 立即返回。
+- M3 parity 应直接在公开 ring API 上实现 `pop/push → register waker → 二次检查 → Pending`，并循环处理 TX 短写。
+- 该桥接只在单 RX consumer、单 TX producer 边界内成立；通用 async read/write/flush 语义留给 M6。

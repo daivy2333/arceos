@@ -150,3 +150,13 @@ arceos SHALL 同时支持 Unikernel 模式(单地址空间,无 Linux 兼容)和�
 - **Decision**: ArceOS 应用需要 IRQ 时必须通过 `axstd/irq` 或 `axfeat/irq` 传播到 `axruntime/irq`；平台层只负责 per-hart interrupt enable 和控制器配置。probe 不得直接调用 `enable_irqs()` 绕过 runtime 生命周期。
 - **Impact**: IRQ 测试夹具必须验证 Cargo feature graph 和 runtime 初始化日志；可确保 timer handler、全局 enable 与设备 IRQ 使用统一顺序。低层独立 crate 测试仍可显式启用 `axhal/irq`，但不能据此宣称完整 runtime IRQ 可用。
 - **Alternatives**: 在 platform `init_later()` 直接设置 `sstatus.SIE`（开启时机过早且绕过 runtime handler 初始化）；在 probe main 中手工开启全局中断（测试不再代表真实应用配置）；让 `axhal/irq` 反向依赖 runtime（违反分层）。
+
+<!-- A05 -->
+### ADR-009: M3 parity 采用 example-local adapter 与 ring-aware echo Future
+
+- **Status**: Proposed
+- **Date**: 2026-06-19
+- **Context**: M1/M2 已提供 PLIC 和单 Future `block_on`，但当前 `uart_16550` 的 async read/write 仍是单次非阻塞 ring 操作，且 ArceOS 0.2 没有 `axpoll` 或通用 UART adapter。直接接入 stdin/TTY 会把 parity 验证与 M5/M6 的语义和并发硬化耦合。
+- **Decision**: M3 在 `examples/async_uart` 内实现窄 adapter，使用 `axtask::block_on`、`spawn_raw`、IRQ-safe 单槽 WakerSet、静态 SPSC rings 和 per-port `fn()` trampoline；echo Future 直接按 ring 状态注册 waker 并二次检查。保持 SBI console，不修改 stdio/TTY/POSIX/axdriver。
+- **Impact**: 能以最小改动验证 IRQ→copier→ring→echo→copier 的完整闭环；PoC 明确限制单核、单 UART、单 reader/writer，adapter 暂不作为公共模块复用。
+- **Alternatives**: 回移 `axpoll` 和 StarryOS TTY（范围越过 M3）；直接使用当前 async device ops（空读/短写语义不能保证等待式 echo）；先在 `axdriver` 建通用 UART 层（parity 前抽象证据不足）。
